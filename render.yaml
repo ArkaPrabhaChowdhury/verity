@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: verity-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: VERITY_ADDR
+        value: :10000
+      - key: VERITY_DB_PATH
+        value: /app/data/verity.db
+      - key: VERITY_DATABASE_URL
+        sync: false
+      - key: VERITY_MAX_ACTIVE_RUNS
+        value: "2"
+      - key: VERITY_API_TOKEN
+        sync: false
+      - key: VERITY_ALLOWED_ORIGINS
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: VERITY_SEARCH_PROVIDER
+        value: searxng
+      - key: SEARXNG_URL
+        value: http://127.0.0.1:8888
+      - key: SEARXNG_SECRET
+        generateValue: true
+      - key: VERITY_SEARCH_COST_PER_QUERY
+        value: "0"

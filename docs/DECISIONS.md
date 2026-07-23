@@ -1,0 +1,25 @@
+# Decisions
+
+- 2026-07-16 — Kept prompts as versioned embedded Markdown files so binaries are self-contained while prompt changes remain diffable.
+- 2026-07-16 — Used a pure-Go HTML extractor to keep one deployable process; extraction quality must be compared with `trafilatura` before changing this boundary.
+- 2026-07-16 — Kept executor concurrency at four because it matches the PRD and is configurable for free-tier throttling.
+- 2026-07-16 — Marked a sub-question partial when any page pipeline fails or fewer than two usable sources remain, preserving uncertainty rather than overstating success.
+- 2026-07-16 — Added an optional `replan_enabled` API field exclusively for the benchmark ablation; normal runs default to the required one-cycle critic behavior.
+- 2026-07-16 — Replaced the specified Gemini 2.0 Flash default with Gemini 3.5 Flash because Google shut down Gemini 2.0 Flash on 2026-06-01 and names 3.5 Flash as its replacement.
+- 2026-07-16 — Retained Groq Llama 3.3 70B as primary because it remains live today, while documenting its announced 2026-08-16 shutdown and keeping the model configurable.
+- 2026-07-16 — Treated benchmark cells as `NOT RUN` until real keys and raw outputs exist; fabricated portfolio metrics would violate the evaluation goal.
+- 2026-07-16 — Chose a deterministic 100-question HotpotQA dev-distractor subset with seed 42 and a content manifest for reproducibility.
+- 2026-07-16 — Used SQuAD-style exact match/token F1 plus a disclosed partial-match threshold because generated reports are longer than extractive QA answers.
+- 2026-07-16 — Used the industrial editorial interface concept in `docs/design/verity-concept.png`, with restrained CSS-only status motion and reduced-motion support.
+- 2026-07-16 — Documented that the current Brave plan is $5/month in credits at $5/1,000 requests, not the PRD's older 2,000-query no-card tier; this reduces guaranteed zero-cost traffic to roughly 1,000 search requests/month.
+- 2026-07-16 — Batched five page extracts into one source-preserving summarization call per sub-question to stay near Groq's free 12k-token/minute limit while retaining concurrent sub-question execution.
+- 2026-07-17 — Replaced Brave as the default with self-hosted SearXNG because Brave now requires a card and its $5 credit covers only about 1,000 searches/month; Brave remains selectable through the provider interface.
+- 2026-07-17 — Rejected Tavily as the default despite its card-free tier because its 1,000-credit monthly cap and additional API key do not satisfy keyless few-dozen-runs/day demos.
+- 2026-07-17 — Limited SearXNG to keyless DuckDuckGo and Bing browser engines and enabled JSON explicitly; this favors zero recurring cost while accepting documented throttling and markup-drift risk.
+- 2026-07-17 — Pinned the official SearXNG multi-platform image digest so local and hosted search behavior does not silently change between builds.
+- 2026-07-17 — Co-located SearXNG with the Go API only in the Render image on loopback port 8888, avoiding both a public unauthenticated search proxy and a second free service.
+- 2026-07-21 — Honor Groq's `Retry-After` header within the existing single-retry policy and preserve the primary 429 when Gemini is unconfigured, because a fixed 500 ms retry cannot recover from the free-tier token window and masked the actionable error.
+- 2026-07-22 — Made the LLM critic advisory by adding a deterministic evidence gate; all-partial, failed, thin, or missing evidence can no longer silently pass as verified.
+- 2026-07-22 — Added transparent source-quality heuristics and deterministic page excerpts for interface triage. Scores are cues, not reliability guarantees, and the original source remains the authority.
+- 2026-07-22 — Kept SQLite as the local-first default while adding a Postgres adapter selected by `VERITY_DATABASE_URL` for durable hosted event replay.
+- 2026-07-22 — Chose a bounded in-process run queue and optional shared bearer token for controlled demos; true multi-user authorization remains an external identity-layer responsibility.

@@ -1,0 +1,14 @@
+{
+  "baseline": {
+    "count": 0,
+    "successful": 0
+  },
+  "no_replan": {
+    "count": 0,
+    "successful": 0
+  },
+  "critic_replan": {
+    "count": 0,
+    "successful": 0
+  }
+}

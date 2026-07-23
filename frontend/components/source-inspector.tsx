@@ -1,0 +1,6 @@
+import type { SourceEvidence } from "@/lib/types";
+
+export function SourceInspector({ source, onClose }: { source?: SourceEvidence; onClose: () => void }) {
+  if (!source) return null;
+  return <div className="inspector-backdrop" role="presentation" onMouseDown={onClose}><aside className="source-inspector" role="dialog" aria-modal="true" aria-labelledby="source-inspector-title" onMouseDown={(event) => event.stopPropagation()}><button className="inspector-close" type="button" onClick={onClose} aria-label="Close source inspector">×</button><span className="eyebrow">Retained evidence</span><h2 id="source-inspector-title">{source.title}</h2><div className="inspector-meta"><span>{source.source_type || "web"}</span><span>{source.domain}</span><span>{source.quality_score ?? 0}/100 quality</span></div><h3>Evidence summary</h3><p>{source.summary}</p><h3>Extracted page text</h3><blockquote>{source.excerpt || "No source excerpt was retained for this legacy run."}</blockquote><p className="inspector-note">The excerpt is deterministic extracted page text. The summary was produced from that text and remains subject to Verity’s trust gate.</p><a className="inspector-link" href={source.url} target="_blank" rel="noreferrer">Open original source ↗</a></aside></div>;
+}

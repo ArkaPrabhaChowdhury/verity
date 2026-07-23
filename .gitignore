@@ -1,0 +1,17 @@
+.env
+*.db
+*.db-shm
+*.db-wal
+backend/verity
+backend/*.exe
+frontend/.next/
+frontend/node_modules/
+frontend/out/
+eval/.venv/
+eval/datasets/*
+!eval/datasets/.gitkeep
+__pycache__/
+*.pyc
+*.tsbuildinfo
+.playwright-cli/
+output/
