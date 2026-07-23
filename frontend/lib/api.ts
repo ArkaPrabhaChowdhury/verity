@@ -1,18 +1,15 @@
 import type { Run, RunEvent } from "./types";
 
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080").replace(/\/$/, "");
-export const API_TOKEN = process.env.NEXT_PUBLIC_VERITY_API_TOKEN ?? "";
+export const API_URL = "/api/verity";
 
 function requestHeaders(json = false): HeadersInit {
   return {
     ...(json ? { "Content-Type": "application/json" } : {}),
-    ...(API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : {}),
   };
 }
 
 export function streamURL(id: string) {
-  const token = API_TOKEN ? `?access_token=${encodeURIComponent(API_TOKEN)}` : "";
-  return `${API_URL}/api/runs/${id}/stream${token}`;
+  return `${API_URL}/api/runs/${id}/stream`;
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {

@@ -1,14 +1,11 @@
-FROM golang:1.24-alpine AS build
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags="-s -w" -o /verity ./cmd/server
-
-FROM alpine:3.21
-RUN apk add --no-cache ca-certificates tzdata
+FROM python:3.13.5-slim
 WORKDIR /app
-COPY --from=build /verity /usr/local/bin/verity
-RUN mkdir -p /app/data
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY verity ./verity
+RUN mkdir -p /app/data && useradd --system --uid 10001 verity && chown -R verity:verity /app
+USER verity
 EXPOSE 8080
-CMD ["verity"]
+CMD ["uvicorn", "verity.app:app", "--host", "0.0.0.0", "--port", "8080"]

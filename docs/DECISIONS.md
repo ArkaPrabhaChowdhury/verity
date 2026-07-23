@@ -23,3 +23,6 @@
 - 2026-07-22 — Added transparent source-quality heuristics and deterministic page excerpts for interface triage. Scores are cues, not reliability guarantees, and the original source remains the authority.
 - 2026-07-22 — Kept SQLite as the local-first default while adding a Postgres adapter selected by `VERITY_DATABASE_URL` for durable hosted event replay.
 - 2026-07-22 — Chose a bounded in-process run queue and optional shared bearer token for controlled demos; true multi-user authorization remains an external identity-layer responsibility.
+- 2026-07-23 — Rebuilt the backend in Python 3.13 with FastAPI, Pydantic, `asyncio`, `httpx`, and async repository adapters while preserving the existing HTTP/SSE contract and deterministic research behavior.
+- 2026-07-23 — Selected Supabase Postgres for hosted durability. Application tables live in a private `verity` schema with RLS enabled and no browser-client grants; the FastAPI service is the only data-access boundary.
+- 2026-07-23 — Retained SQLite only for zero-setup local development and tests; production configuration requires `VERITY_DATABASE_URL`.

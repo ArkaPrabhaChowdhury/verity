@@ -7,10 +7,6 @@ services:
     dockerContext: .
     healthCheckPath: /health
     envVars:
-      - key: VERITY_ADDR
-        value: :10000
-      - key: VERITY_DB_PATH
-        value: /app/data/verity.db
       - key: VERITY_DATABASE_URL
         sync: false
       - key: VERITY_MAX_ACTIVE_RUNS
