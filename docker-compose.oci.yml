@@ -1,0 +1,70 @@
+services:
+  searxng:
+    image: docker.io/searxng/searxng@sha256:252cfb5b348809167f5519970ca3457711e723afc76179a662b1c720cbbc1dd3
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET}
+      SEARXNG_LIMITER: "false"
+      SEARXNG_PUBLIC_INSTANCE: "false"
+    volumes:
+      - ./search/searxng:/etc/searxng:ro
+      - searxng-cache:/var/cache/searxng
+    mem_limit: 320m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/', timeout=2)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.1-8b-instant}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash}
+      VERITY_SEARCH_PROVIDER: searxng
+      SEARXNG_URL: http://searxng:8080
+      VERITY_ADDR: :8080
+      VERITY_DB_PATH: /app/data/verity.db
+      VERITY_ALLOWED_ORIGINS: ${VERITY_ALLOWED_ORIGINS:-https://verity.vercel.app}
+      VERITY_CONCURRENCY: "1"
+      VERITY_MAX_ACTIVE_RUNS: "1"
+      VERITY_API_TOKEN: ${VERITY_API_TOKEN}
+      VERITY_SEARCH_COST_PER_QUERY: "0"
+    volumes:
+      - verity-data:/app/data
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      searxng:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      VERITY_HOST: ${VERITY_HOST}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    mem_limit: 128m
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  verity-data:
+  searxng-cache:
+  caddy-data:
+  caddy-config:

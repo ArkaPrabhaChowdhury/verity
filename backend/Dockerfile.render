@@ -1,22 +1,19 @@
-FROM golang:1.24-alpine AS build
-WORKDIR /src
-COPY backend/go.mod backend/go.sum ./
-RUN go mod download
-COPY backend/ .
-RUN CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags="-s -w" -o /verity ./cmd/server
-
 FROM docker.io/searxng/searxng@sha256:252cfb5b348809167f5519970ca3457711e723afc76179a662b1c720cbbc1dd3
 USER root
-COPY --from=build /verity /usr/local/bin/verity
-COPY search/searxng/settings.yml /app/searxng/settings.yml
+COPY backend/requirements.txt /tmp/verity-requirements.txt
+RUN python -m venv /opt/verity && /opt/verity/bin/pip install --no-cache-dir -r /tmp/verity-requirements.txt
+COPY backend/verity /app/verity
+COPY search/searxng/settings.yml /etc/searxng/settings.yml
 COPY backend/render-entrypoint.sh /usr/local/bin/verity-render
-RUN chmod 0755 /usr/local/bin/verity /usr/local/bin/verity-render && mkdir -p /app/data && chown -R 977:977 /app
+RUN chmod 0755 /usr/local/bin/verity-render \
+    && mkdir -p /app/data \
+    && chown -R 977:977 /app /etc/searxng
 USER 977:977
 WORKDIR /app
 ENV GRANIAN_HOST=127.0.0.1 \
     GRANIAN_PORT=8888 \
-    SEARXNG_SETTINGS_PATH=/app/searxng/settings.yml \
     SEARXNG_URL=http://127.0.0.1:8888 \
-    VERITY_SEARCH_PROVIDER=searxng
+    VERITY_SEARCH_PROVIDER=searxng \
+    PYTHONUNBUFFERED=1
 EXPOSE 10000
 ENTRYPOINT ["/usr/local/bin/verity-render"]

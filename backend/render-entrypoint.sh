@@ -6,7 +6,7 @@ set -eu
   exec /usr/local/searxng/entrypoint.sh
 ) &
 search_pid=$!
-verity &
+/opt/verity/bin/uvicorn verity.app:app --host 0.0.0.0 --port "${PORT:-10000}" &
 api_pid=$!
 
 shutdown() {

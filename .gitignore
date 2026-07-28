@@ -2,8 +2,8 @@
 *.db
 *.db-shm
 *.db-wal
-backend/verity
 backend/*.exe
+backend/.venv/
 frontend/.next/
 frontend/node_modules/
 frontend/out/
@@ -12,6 +12,8 @@ eval/datasets/*
 !eval/datasets/.gitkeep
 __pycache__/
 *.pyc
+.pytest_cache/
+.ruff_cache/
 *.tsbuildinfo
 .playwright-cli/
 output/

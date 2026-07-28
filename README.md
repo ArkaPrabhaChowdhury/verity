@@ -1,12 +1,12 @@
 # Verity
 
-Verity is an evidence-first autonomous research agent written as a custom Go state machine. It plans a question, researches independent sub-questions concurrently, critiques coverage and contradictions, performs at most one corrective re-plan, and writes a cited report that always exposes gaps.
+Verity is an evidence-first autonomous research agent built with Python, FastAPI, Next.js, and Supabase. It plans a question, researches independent sub-questions concurrently, critiques coverage and contradictions, performs at most one corrective re-plan, and writes a cited report that always exposes gaps.
 
 ![Verity interface concept](docs/design/verity-concept.png)
 
 ## Why this exists
 
-This repo demonstrates orchestration and evaluation engineering, not an agent-framework wrapper. There is no LangGraph, AutoGen, CrewAI, or external job queue. Goroutines, contexts, typed provider boundaries, explicit state transitions, SQLite snapshots, and SSE events make the execution model inspectable.
+This repo demonstrates orchestration and evaluation engineering, not an agent-framework wrapper. There is no LangGraph, AutoGen, CrewAI, or external job queue. Typed Pydantic boundaries, explicit state transitions, bounded `asyncio` concurrency, durable snapshots, and SSE events make execution inspectable.
 
 ```mermaid
 flowchart LR
@@ -18,21 +18,21 @@ flowchart LR
     E --> F[Cited report]
 ```
 
-The detailed design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and implementation judgments are recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
+The detailed design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), implementation judgments are recorded in [docs/DECISIONS.md](docs/DECISIONS.md), and [docs/PORTFOLIO.md](docs/PORTFOLIO.md) contains resume bullets and a concise interview/demo narrative.
 
 ## Current implementation
 
-- Go planner → executor → critic → writer FSM with a code-enforced one-re-plan maximum.
-- Four-worker bounded executor; 25-second sub-question deadlines; one 500 ms retry for transient errors.
-- Keyless self-hosted SearXNG search, five-page retrieval, SSRF-aware fetching, pure-Go text extraction, and source-specific summaries; Brave remains an optional provider.
+- Python planner → executor → critic → writer FSM with a code-enforced one-re-plan maximum.
+- Bounded `asyncio` executor; 25-second sub-question deadlines; one provider-directed retry for transient errors.
+- Keyless self-hosted SearXNG search, five-page retrieval, SSRF-aware fetching, Beautiful Soup extraction, and source-specific summaries; Brave remains optional.
 - Groq primary and Gemini fallback behind one interface; JSON-mode plus validation/retry for structured stages.
 - Partial sub-question failures survive into critic input, persisted trace data, SSE events, and report caveats.
-- SQLite run snapshots and append-only events; replayable `GET /api/runs/{id}` records.
+- Supabase Postgres run snapshots and append-only events in a locked private schema; SQLite remains the zero-setup local adapter.
 - Next.js live workspace with progress stages, evidence outcomes, re-plan visibility, source rail, and cited Markdown.
 - Deterministic trust gate (`verified`, `qualified`, or `inconclusive`) that can override an overconfident critic decision when evidence is thin, missing, failed, or entirely partial.
 - Interactive Evidence Ledger with retained page excerpts, source classification, quality heuristics, plan rationale, search queries, and claim-scope warnings.
 - Append-only run timeline, stage/provider telemetry, no-re-plan comparison view, source inspector, shareable run URLs, and Markdown/JSON/PDF exports.
-- Bounded run queue, cancellation/retry/deletion APIs, optional bearer protection, per-client creation limits, a 30-minute evidence cache, and SQLite/Postgres storage adapters.
+- Bounded run queue, cancellation/retry/deletion APIs, optional bearer protection, per-client creation limits, a 30-minute evidence cache, and async SQLite/Supabase adapters.
 - Reproducible HotpotQA baseline/ablation/critic benchmark scripts with resumable JSONL output.
 
 ## Run locally
@@ -51,7 +51,8 @@ For process-level development:
 
 ```bash
 docker compose up -d searxng
-cd backend && go run ./cmd/server
+cd backend && python -m venv .venv && python -m pip install -r requirements-dev.txt
+cd backend && python -m uvicorn verity.app:app --reload --port 8080
 cd frontend && npm install && npm run dev
 ```
 
@@ -90,9 +91,9 @@ Every new source record retains its domain, a deterministic extracted-text excer
 
 ## Production deployment
 
-SQLite remains the zero-setup default. Set `VERITY_DATABASE_URL` to a Postgres DSN for durable hosted runs and append-only events; Postgres takes precedence over `VERITY_DB_PATH`. `VERITY_MAX_ACTIVE_RUNS` bounds concurrent runs while additional work remains queued. Creation is limited to ten runs per client address per minute.
+SQLite remains the zero-setup local default. Production uses Supabase Postgres through `VERITY_DATABASE_URL`; the application writes only to the private `verity` schema created by the tracked migration in `supabase/migrations`. Use the Supavisor session-pooler connection string for persistent IPv4 hosts. `VERITY_MAX_ACTIVE_RUNS` bounds concurrent runs while additional work remains queued. Creation is limited to ten runs per client address per minute.
 
-For a genuinely multi-user deployment, place Verity behind an identity-aware proxy or replace the optional shared bearer token with application authentication and per-user quotas. Do not expose `NEXT_PUBLIC_VERITY_API_TOKEN` to an untrusted public client.
+The Next.js route handler proxies API and SSE traffic server-side, so Vercel stores `VERITY_API_URL` and `VERITY_API_TOKEN` without exposing either to the browser. A genuinely multi-user product should still replace the shared deployment token with user authentication, authorization, and per-user quotas.
 
 ## Benchmark
 
@@ -138,12 +139,12 @@ Provider offerings have drifted since the PRD, so the default search path is now
 
 Self-hosted SearXNG has no per-query API price, so an illustrative paid-tier estimate at 50k Groq input tokens and 6k output tokens per run is **$34.24 per 1,000 runs**, plus compute and bandwidth. The benchmark replaces those assumptions with measured usage. Zero search spend does not guarantee unlimited reliability: upstream browser-search engines can throttle or change markup, and Verity records those failures as partial evidence.
 
-Local Docker hosting is recurring-cost free. The Render image starts SearXNG beside the Go API on a loopback-only port, keeping the search endpoint private and using one free web service; cold starts are expected. Vercel's frontend free tier is suitable for the UI. Render's free filesystem is ephemeral, so durable SQLite replay there still requires a paid disk or a later external-store adapter.
+Local Docker hosting is recurring-cost free. The Render image starts SearXNG beside the FastAPI service on a loopback-only port, keeping the search endpoint private and using one web service. The Next.js workspace deploys on Vercel, while Supabase provides durable Postgres replay independently of Render's ephemeral filesystem.
 
 ## Verification
 
 ```bash
-cd backend && go test -race ./... && go vet ./...
+cd backend && python -m ruff check verity tests && python -m pytest
 cd frontend && npm ci && npm run typecheck && npm run build
 cd eval && python -m unittest discover -s tests
 ```

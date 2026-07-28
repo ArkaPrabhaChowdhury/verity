@@ -38,7 +38,13 @@ services:
     volumes:
       - verity-data:/app/data
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)",
+        ]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -48,9 +54,9 @@ services:
   frontend:
     build:
       context: ./frontend
-      args:
-        NEXT_PUBLIC_API_URL: http://localhost:8080
-        NEXT_PUBLIC_VERITY_API_TOKEN: ${NEXT_PUBLIC_VERITY_API_TOKEN:-}
+    environment:
+      VERITY_API_URL: http://backend:8080
+      VERITY_API_TOKEN: ${VERITY_API_TOKEN:-}
     ports:
       - "3000:3000"
     depends_on:
