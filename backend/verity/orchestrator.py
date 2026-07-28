@@ -304,20 +304,12 @@ class Executor:
                     else []
                 )
                 rejected = len(documents) - len(sources)
-                if not sources:
-                    status, error = (
-                        "failed",
-                        f"no usable evidence: {direct_failures} direct fetches failed; "
-                        f"{rejected} documents were irrelevant or unsupported",
-                    )
-                elif len(sources) < 2 or direct_failures or rejected:
-                    status, error = (
-                        "partial",
-                        f"{len(sources)} of {len(results)} sources produced usable evidence; "
-                        f"{direct_failures} direct fetches used snippets or failed",
-                    )
-                else:
-                    status, error = "success", ""
+                status, error = classify_evidence_path(
+                    sources,
+                    len(results),
+                    direct_failures,
+                    rejected,
+                )
         except Exception as error:
             status, sources = "failed", []
             error = str(error)
@@ -419,6 +411,12 @@ class Executor:
 def classify_source(domain: str) -> tuple[str, int]:
     if domain.endswith((".gov", ".gov.uk", ".europa.eu")):
         return "government", 95
+    if domain in {"fastapi.tiangolo.com", "docs.python.org"}:
+        return "documentation", 95
+    if domain.startswith("docs.") or domain.endswith(".readthedocs.io"):
+        return "documentation", 85
+    if domain == "pypi.org":
+        return "registry", 80
     research_domains = ("nature.com", "sciencedirect.com")
     if domain.endswith(".edu") or any(
         value in domain for value in research_domains
@@ -429,6 +427,33 @@ def classify_source(domain: str) -> tuple[str, int]:
     if any(value in domain for value in ("wikipedia.org", "medium.com", "blog")):
         return "secondary", 55
     return "web", 65
+
+
+def classify_evidence_path(
+    sources: list[SourceEvidence],
+    result_count: int,
+    direct_failures: int,
+    rejected: int,
+) -> tuple[str, str]:
+    if not sources:
+        return (
+            "failed",
+            f"no usable evidence: {direct_failures} direct fetches failed; "
+            f"{rejected} documents were irrelevant or unsupported",
+        )
+    independent_domains = {
+        (source.domain or (urlparse(source.url).hostname or "")).removeprefix("www.")
+        for source in sources
+        if source.domain or urlparse(source.url).hostname
+    }
+    if len(sources) >= 2 and len(independent_domains) >= 2:
+        return "success", ""
+    return (
+        "partial",
+        f"{len(sources)} of {result_count} sources produced usable evidence across "
+        f"{len(independent_domains)} independent domains; "
+        f"{direct_failures} direct fetches used snippets or failed",
+    )
 
 
 def compact_excerpt(value: str, limit: int) -> str:
@@ -499,6 +524,14 @@ def enforce_critic_decision(output: CriticOutput, findings: list[Finding]) -> No
 def assess_trust(
     findings: list[Finding], critiques: list[CriticOutput]
 ) -> TrustAssessment:
+    if not findings:
+        return TrustAssessment(
+            status="inconclusive",
+            score=0,
+            summary="No evidence was available to assess.",
+            reasons=["The run produced no research findings."],
+        )
+
     successful = sum(item.status == "success" for item in findings)
     partial = sum(item.status == "partial" for item in findings)
     failed = sum(item.status == "failed" for item in findings)
@@ -509,26 +542,51 @@ def assess_trust(
         if source.domain or urlparse(source.url).hostname
     }
     contradictions = any(item.contradictions for item in critiques)
-    status, score, reasons = "verified", 100, []
-    if not findings or failed or not successful:
-        status, score = "inconclusive", 25
-        reasons.append("No fully successful evidence path supports a confident answer.")
-    elif partial:
-        status, score = "qualified", score - min(45, partial * 10)
-        reasons.append(f"{partial} of {len(findings)} research paths have incomplete evidence.")
+    forced_proceed = any(item.forced_proceed for item in critiques)
+    source_scores = [
+        source.quality_score for item in findings for source in item.sources
+    ]
+    average_quality = round(sum(source_scores) / len(source_scores)) if source_scores else 0
+    total = len(findings)
+    score, reasons = 100, []
+
+    if partial:
+        penalty = round(40 * partial / total)
+        score -= penalty
+        reasons.append(
+            f"{partial} of {total} research paths had usable but incomplete evidence."
+        )
     if failed:
-        score -= min(30, failed * 15)
+        score -= round(50 * failed / total)
         reasons.append(f"{failed} research paths failed.")
+    if not successful:
+        score = min(score, 45)
+        reasons.append("No research path met the full-support threshold.")
     if len(domains) < 2:
-        status, score = "inconclusive", min(score, 30)
+        score = min(score, 30)
         reasons.append("Fewer than two independent source domains were available.")
+    if average_quality < 70:
+        quality_penalty = min(15, 70 - average_quality)
+        score -= quality_penalty
+        reasons.append(
+            f"Average retained source quality was moderate ({average_quality}/100)."
+        )
     if contradictions:
-        status = "qualified" if status == "verified" else status
         score -= 15
         reasons.append("The critic found unresolved contradictory evidence.")
-    if any(item.forced_proceed for item in critiques):
-        status, score = "inconclusive", min(score, 35)
-        reasons.append("The run reached its re-plan limit with unresolved gaps.")
+    if forced_proceed:
+        score -= 10
+        reasons.append(
+            "The run reached its re-plan limit; unresolved gaps remain reflected in the score."
+        )
+
+    score = max(0, score)
+    if score < 50 or not successful or len(domains) < 2:
+        status = "inconclusive"
+    elif partial or failed or contradictions or forced_proceed or average_quality < 70:
+        status = "qualified"
+    else:
+        status = "verified"
     summaries = {
         "verified": "Evidence coverage passed Verity's deterministic trust gate.",
         "qualified": "The answer is usable with material qualifications.",
@@ -536,7 +594,7 @@ def assess_trust(
     }
     return TrustAssessment(
         status=status,
-        score=max(0, score),
+        score=score,
         summary=summaries[status],
         reasons=reasons,
         successful_findings=successful,

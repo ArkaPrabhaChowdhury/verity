@@ -8,12 +8,14 @@ from verity.models import (
 )
 from verity.orchestrator import (
     assess_trust,
+    classify_evidence_path,
+    classify_source,
     enforce_critic_decision,
     validate_report,
 )
 
 
-def source(url: str) -> SourceEvidence:
+def source(url: str, quality_score: int = 65) -> SourceEvidence:
     return SourceEvidence(
         title=url,
         url=url,
@@ -21,7 +23,7 @@ def source(url: str) -> SourceEvidence:
         summary="Supported evidence.",
         excerpt="Evidence excerpt.",
         source_type="web",
-        quality_score=65,
+        quality_score=quality_score,
     )
 
 
@@ -50,8 +52,8 @@ def test_trust_verifies_independent_successful_evidence() -> None:
                 question="Question",
                 status="success",
                 sources=[
-                    source("https://one.example/a"),
-                    source("https://two.example/b"),
+                    source("https://one.example/a", 90),
+                    source("https://two.example/b", 90),
                 ],
                 round=0,
             )
@@ -60,6 +62,83 @@ def test_trust_verifies_independent_successful_evidence() -> None:
     )
     assert trust.status == "verified"
     assert trust.score == 100
+
+
+def test_discarded_search_noise_does_not_downgrade_supported_path() -> None:
+    status, error = classify_evidence_path(
+        [
+            source("https://one.example/a"),
+            source("https://two.example/b"),
+        ],
+        result_count=4,
+        direct_failures=1,
+        rejected=1,
+    )
+    assert status == "success"
+    assert error == ""
+
+
+def test_same_domain_sources_remain_partial() -> None:
+    status, error = classify_evidence_path(
+        [
+            source("https://one.example/a"),
+            source("https://one.example/b"),
+        ],
+        result_count=4,
+        direct_failures=0,
+        rejected=2,
+    )
+    assert status == "partial"
+    assert "1 independent domains" in error
+
+
+def test_official_documentation_receives_primary_source_weight() -> None:
+    assert classify_source("fastapi.tiangolo.com") == ("documentation", 95)
+
+
+def test_mixed_replan_evidence_is_qualified_instead_of_collapsed() -> None:
+    findings = [
+        Finding(
+            sub_question_id=f"success-{index}",
+            question="Question",
+            status="success",
+            sources=[
+                source(f"https://primary{index}.example/a", 75),
+                source(f"https://secondary{index}.example/b", 75),
+            ],
+            round=0,
+        )
+        for index in range(4)
+    ]
+    findings.extend(
+        Finding(
+            sub_question_id=f"partial-{index}",
+            question="Question",
+            status="partial",
+            sources=[source(f"https://partial{index}.example/a", 65)],
+            round=0,
+        )
+        for index in range(4)
+    )
+    findings.append(
+        Finding(
+            sub_question_id="failed",
+            question="Question",
+            status="failed",
+            round=1,
+        )
+    )
+    critique = CriticOutput(
+        coverage_assessment=[],
+        decision="PROCEED",
+        forced_proceed=True,
+    )
+
+    trust = assess_trust(findings, [critique])
+
+    assert trust.status == "qualified"
+    assert 55 <= trust.score <= 70
+    assert "re-plan limit" in " ".join(trust.reasons)
 
 
 def test_contradiction_qualifies_trust() -> None:
@@ -114,4 +193,3 @@ def test_report_rejects_unknown_urls() -> None:
     )
     with pytest.raises(ValueError, match="unknown URL"):
         validate_report(report, {"https://known.example"})
-
