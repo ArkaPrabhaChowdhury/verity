@@ -310,9 +310,9 @@ class Executor:
                     direct_failures,
                     rejected,
                 )
-        except Exception as error:
+        except Exception as exception:
             status, sources = "failed", []
-            error = str(error)
+            error = str(exception)
         return Finding(
             sub_question_id=sub.id,
             question=sub.question,

@@ -5,8 +5,11 @@ from verity.models import (
     CriticOutput,
     Finding,
     SourceEvidence,
+    SubQuestion,
 )
 from verity.orchestrator import (
+    Executor,
+    UsageRecorder,
     assess_trust,
     classify_evidence_path,
     classify_source,
@@ -90,6 +93,33 @@ def test_same_domain_sources_remain_partial() -> None:
     )
     assert status == "partial"
     assert "1 independent domains" in error
+
+
+async def test_executor_persists_subquestion_exception_as_failed_finding() -> None:
+    class FailingSearch:
+        async def search(self, query: str, max_results: int):
+            raise RuntimeError("search unavailable")
+
+    executor = Executor(
+        llm=None,
+        search=FailingSearch(),
+        extractor=None,
+        concurrency=1,
+        search_cost_per_query=0,
+    )
+    finding = await executor._execute_one(
+        SubQuestion(
+            id="q1",
+            question="Question",
+            search_query="query",
+            rationale="Test failure persistence",
+            round=0,
+        ),
+        UsageRecorder(),
+    )
+
+    assert finding.status == "failed"
+    assert finding.error == "search unavailable"
 
 
 def test_official_documentation_receives_primary_source_weight() -> None:
