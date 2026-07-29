@@ -1,6 +1,6 @@
 # Verity
 
-Verity is an evidence-first autonomous research agent built with Python, FastAPI, Next.js, and Supabase. It plans a question, researches independent sub-questions concurrently, critiques coverage and contradictions, performs at most one corrective re-plan, and writes a cited report that always exposes gaps.
+Verity is an evidence-first autonomous research agent built with Python, FastAPI, and Next.js, with SQLite persistence today and an optional Supabase-ready Postgres adapter. It plans a question, researches independent sub-questions concurrently, critiques coverage and contradictions, performs at most one corrective re-plan, and writes a cited report that always exposes gaps.
 
 ![Verity interface concept](docs/design/verity-concept.png)
 
@@ -27,12 +27,12 @@ The detailed design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), implemen
 - Keyless self-hosted SearXNG search, five-page retrieval, SSRF-aware fetching, Beautiful Soup extraction, and source-specific summaries; Brave remains optional.
 - Groq primary and Gemini fallback behind one interface; JSON-mode plus validation/retry for structured stages.
 - Partial sub-question failures survive into critic input, persisted trace data, SSE events, and report caveats.
-- Supabase Postgres run snapshots and append-only events in a locked private schema; SQLite remains the zero-setup local adapter.
+- SQLite run snapshots and append-only events, plus an optional Supabase-ready Postgres adapter and locked private-schema migration.
 - Next.js live workspace with progress stages, evidence outcomes, re-plan visibility, source rail, and cited Markdown.
 - Deterministic trust gate (`verified`, `qualified`, or `inconclusive`) that can override an overconfident critic decision when evidence is thin, missing, failed, or entirely partial.
 - Interactive Evidence Ledger with retained page excerpts, source classification, quality heuristics, plan rationale, search queries, and claim-scope warnings.
 - Append-only run timeline, stage/provider telemetry, no-re-plan comparison view, source inspector, shareable run URLs, and Markdown/JSON/PDF exports.
-- Bounded run queue, cancellation/retry/deletion APIs, optional bearer protection, per-client creation limits, a 30-minute evidence cache, and async SQLite/Supabase adapters.
+- Bounded run queue, cancellation/retry/deletion APIs, optional bearer protection, per-client creation limits, a 30-minute evidence cache, and async SQLite/Postgres adapters.
 - Reproducible HotpotQA baseline/ablation/critic benchmark scripts with resumable JSONL output.
 
 ## Run locally
@@ -91,7 +91,7 @@ Every new source record retains its domain, a deterministic extracted-text excer
 
 ## Production deployment
 
-SQLite remains the zero-setup local default. Production uses Supabase Postgres through `VERITY_DATABASE_URL`; the application writes only to the private `verity` schema created by the tracked migration in `supabase/migrations`. Use the Supavisor session-pooler connection string for persistent IPv4 hosts. `VERITY_MAX_ACTIVE_RUNS` bounds concurrent runs while additional work remains queued. Creation is limited to ten runs per client address per minute.
+SQLite is the current runtime and zero-setup default. The repository also supports optional Supabase Postgres through `VERITY_DATABASE_URL`; when configured, the application writes only to the private `verity` schema created by the tracked migration in `supabase/migrations`. Use the Supavisor session-pooler connection string for persistent IPv4 hosts. No Verity Supabase project is currently provisioned, so the deployed application does not use this optional path. `VERITY_MAX_ACTIVE_RUNS` bounds concurrent runs while additional work remains queued. Creation is limited to ten runs per client address per minute.
 
 The Next.js route handler proxies API and SSE traffic server-side, so Vercel stores `VERITY_API_URL` and `VERITY_API_TOKEN` without exposing either to the browser. A genuinely multi-user product should still replace the shared deployment token with user authentication, authorization, and per-user quotas.
 
@@ -139,7 +139,7 @@ Provider offerings have drifted since the PRD, so the default search path is now
 
 Self-hosted SearXNG has no per-query API price, so an illustrative paid-tier estimate at 50k Groq input tokens and 6k output tokens per run is **$34.24 per 1,000 runs**, plus compute and bandwidth. The benchmark replaces those assumptions with measured usage. Zero search spend does not guarantee unlimited reliability: upstream browser-search engines can throttle or change markup, and Verity records those failures as partial evidence.
 
-Local Docker hosting is recurring-cost free. The Render image starts SearXNG beside the FastAPI service on a loopback-only port, keeping the search endpoint private and using one web service. The Next.js workspace deploys on Vercel, while Supabase provides durable Postgres replay independently of Render's ephemeral filesystem.
+Local Docker hosting is recurring-cost free. The Render image starts SearXNG beside the FastAPI service on a loopback-only port, keeping the search endpoint private and using one web service. The Next.js workspace deploys on Vercel. If a Supabase project is provisioned later, the implemented Postgres adapter can provide durable replay independently of the backend filesystem.
 
 ## Verification
 
