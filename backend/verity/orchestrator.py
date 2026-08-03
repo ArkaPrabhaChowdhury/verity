@@ -522,6 +522,14 @@ def is_relevant_document(document: Document, question: str) -> bool:
     if not question_terms:
         return bool(document.text.strip())
     document_text = f"{document.title} {document.url} {document.text[:1200]}"
+    animal_title = re.search(
+        r"\banimal models?\b|\bmouse\b|\bmice\b|\brats?\b",
+        document.title,
+        re.IGNORECASE,
+    )
+    human_question = re.search(r"\badults?\b|\bhumans?\b", question, re.IGNORECASE)
+    if animal_title and human_question:
+        return False
     document_terms = _evidence_terms(document_text)
     generic_terms = {
         "about", "adult", "adults", "after", "current", "does", "effect",

@@ -180,6 +180,14 @@ def test_irrelevant_boilerplate_is_rejected() -> None:
     )
     assert not is_relevant_document(
         Document(
+            url="https://journals.plos.org/plosone/article?id=2",
+            title="Intermittent fasting in animal models: a systematic review",
+            text="This review evaluates animal models.",
+        ),
+        "intermittent fasting for weight loss in adults",
+    )
+    assert not is_relevant_document(
+        Document(
             url="https://doi.org/10.1234/exercise",
             title="Effects of high-intensity interval training on cardiometabolic health",
             text="A systematic review of exercise and body weight outcomes.",
