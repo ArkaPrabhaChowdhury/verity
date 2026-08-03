@@ -521,12 +521,21 @@ def is_relevant_document(document: Document, question: str) -> bool:
     question_terms = _evidence_terms(question)
     if not question_terms:
         return bool(document.text.strip())
-    document_terms = _evidence_terms(
-        f"{document.title} {document.url} {document.text[:1200]}"
-    )
+    document_text = f"{document.title} {document.url} {document.text[:1200]}"
+    document_terms = _evidence_terms(document_text)
     overlap = question_terms & document_terms
-    required = 1 if len(question_terms) == 1 else 2
-    return len(overlap) >= required
+    if len(overlap) >= 3:
+        return True
+    question_phrases = {
+        " ".join(pair)
+        for pair in zip(
+            re.findall(r"[a-z0-9]{4,}", question.lower()),
+            re.findall(r"[a-z0-9]{4,}", question.lower())[1:],
+            strict=False,
+        )
+    }
+    normalized_document = re.sub(r"[-/]", " ", document_text.lower())
+    return len(overlap) >= 2 and any(phrase in normalized_document for phrase in question_phrases)
 
 
 def classify_evidence_path(

@@ -170,6 +170,14 @@ def test_irrelevant_boilerplate_is_rejected() -> None:
         ),
         "urban tree planting reducing summer heat",
     )
+    assert not is_relevant_document(
+        Document(
+            url="https://doi.org/10.1234/stroke",
+            title="The impact of triglyceride index on ischemic stroke: a systematic review",
+            text="This review examines stroke outcomes and metabolic risk factors.",
+        ),
+        "intermittent fasting for weight loss in adults",
+    )
 
 
 def test_mixed_replan_evidence_is_qualified_instead_of_collapsed() -> None:
