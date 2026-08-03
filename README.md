@@ -24,7 +24,7 @@ The detailed design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), implemen
 
 - Python planner → executor → critic → writer FSM with a code-enforced one-re-plan maximum.
 - Bounded `asyncio` executor; 25-second sub-question deadlines; one provider-directed retry for transient errors.
-- Keyless self-hosted SearXNG search, five-page retrieval, SSRF-aware fetching, Beautiful Soup extraction, and source-specific summaries; Brave remains optional.
+- Keyless self-hosted SearXNG search with complementary general, official-documentation, and research queries, trusted-source ranking, SSRF-aware fetching, Beautiful Soup extraction, and source-specific summaries; Brave remains optional.
 - Groq primary and Gemini fallback behind one interface; JSON-mode plus validation/retry for structured stages.
 - Partial sub-question failures survive into critic input, persisted trace data, SSE events, and report caveats.
 - SQLite run snapshots and append-only events, plus an optional Supabase-ready Postgres adapter and locked private-schema migration.
@@ -59,6 +59,8 @@ cd frontend && npm install && npm run dev
 The local SearXNG JSON API is bound to `127.0.0.1:8888`, and the backend reaches it at `http://searxng:8080` inside Compose. Its tracked configuration enables DuckDuckGo and Bing browser-search engines. Do not commit LLM keys. The server can boot without one so health checks and the UI work, but a research run will fail with a clear LLM provider error until you add Groq or Gemini.
 
 To use Brave instead, set `VERITY_SEARCH_PROVIDER=brave` and add `BRAVE_SEARCH_API_KEY`. Its current $0.005/request estimate is selected automatically unless `VERITY_SEARCH_COST_PER_QUERY` overrides it. Provider selection does not alter orchestration code.
+
+Each sub-question searches three complementary query variants by default and retrieves up to six results per variant. Set `VERITY_SEARCH_QUERIES_PER_QUESTION` and `VERITY_SEARCH_RESULTS_PER_QUERY` to tune breadth and search cost. Results from government, official documentation, standards, and established research domains are ranked before generic web pages; this is a source-quality heuristic, not proof that a paper is peer-reviewed or that a document is correct.
 
 ## API
 

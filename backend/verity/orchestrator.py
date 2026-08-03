@@ -245,12 +245,16 @@ class Executor:
         extractor: Extractor,
         concurrency: int,
         search_cost_per_query: float,
+        search_queries_per_question: int = 3,
+        search_results_per_query: int = 6,
     ) -> None:
         self.llm = llm
         self.search = search
         self.extractor = extractor
         self.semaphore = asyncio.Semaphore(max(1, concurrency))
         self.search_cost_per_query = search_cost_per_query
+        self.search_queries_per_question = max(1, search_queries_per_question)
+        self.search_results_per_query = max(1, search_results_per_query)
         self.cache = EvidenceCache()
 
     async def execute(
@@ -280,13 +284,26 @@ class Executor:
         try:
             async with asyncio.timeout(60):
                 query = sub.search_query.strip() or sub.question.strip().rstrip("?")
-                cache_key = f"{query}|4"
+                query_variants = build_search_queries(query, self.search_queries_per_question)
+                cache_key = f"{'|'.join(query_variants)}|{self.search_results_per_query}"
                 results = self.cache.get_search(cache_key)
                 if results is None:
-                    recorder.record_search(self.search_cost_per_query)
-                    results = await retry_transient(
-                        lambda: self.search.search(query, 4), max_attempts=2
-                    )
+                    collected: dict[str, SearchResult] = {}
+                    for search_query in query_variants:
+                        recorder.record_search(self.search_cost_per_query)
+                        variant_results = await retry_transient(
+                            lambda search_query=search_query: self.search.search(
+                                search_query, self.search_results_per_query
+                            ),
+                            max_attempts=2,
+                        )
+                        for result in variant_results:
+                            normalized_url = result.url.rstrip("/")
+                            if normalized_url and normalized_url not in collected:
+                                collected[normalized_url] = result.model_copy(
+                                    update={"url": normalized_url}
+                                )
+                    results = sorted(collected.values(), key=source_result_priority)
                     self.cache.set_search(cache_key, results)
                 page_results = await asyncio.gather(
                     *(self._fetch_result(item) for item in results)
@@ -409,17 +426,40 @@ class Executor:
 
 
 def classify_source(domain: str) -> tuple[str, int]:
-    if domain.endswith((".gov", ".gov.uk", ".europa.eu")):
+    domain = domain.lower().removeprefix("www.")
+    if domain in {"ncbi.nlm.nih.gov", "pubmed.ncbi.nlm.nih.gov"}:
+        return "research", 90
+    if domain.endswith((".gov", ".gov.uk", ".europa.eu", ".int")):
         return "government", 95
-    if domain in {"fastapi.tiangolo.com", "docs.python.org"}:
+    if domain in {
+        "fastapi.tiangolo.com",
+        "docs.python.org",
+        "developer.mozilla.org",
+        "docs.docker.com",
+    }:
         return "documentation", 95
     if domain.startswith("docs.") or domain.endswith(".readthedocs.io"):
         return "documentation", 85
     if domain == "pypi.org":
         return "registry", 80
-    research_domains = ("nature.com", "sciencedirect.com")
-    if domain.endswith(".edu") or any(
-        value in domain for value in research_domains
+    research_domains = {
+        "acm.org",
+        "arxiv.org",
+        "bmj.com",
+        "cochranelibrary.com",
+        "doi.org",
+        "ieee.org",
+        "jamanetwork.com",
+        "nature.com",
+        "ncbi.nlm.nih.gov",
+        "plos.org",
+        "pubmed.ncbi.nlm.nih.gov",
+        "sciencedirect.com",
+        "springer.com",
+        "usenix.org",
+    }
+    if domain.endswith(".edu") or domain in research_domains or any(
+        domain.endswith(f".{value}") for value in research_domains
     ):
         return "research", 90
     if any(value in domain for value in ("reuters.com", "apnews.com", "bbc.")):
@@ -427,6 +467,27 @@ def classify_source(domain: str) -> tuple[str, int]:
     if any(value in domain for value in ("wikipedia.org", "medium.com", "blog")):
         return "secondary", 55
     return "web", 65
+
+
+def build_search_queries(query: str, limit: int) -> list[str]:
+    """Create complementary searches that favor primary and validated evidence."""
+    variants = [
+        query,
+        f"{query} official documentation standard",
+        f"{query} research paper evidence review",
+    ]
+    return list(dict.fromkeys(item[:180].strip() for item in variants[: max(1, limit)]))
+
+
+def source_result_priority(result: SearchResult) -> tuple[int, int, str]:
+    domain = (urlparse(result.url).hostname or "").lower().removeprefix("www.")
+    source_type, quality = classify_source(domain)
+    # Stable ordering keeps cached and uncached runs reproducible.
+    return (
+        0 if source_type in {"government", "documentation", "research"} else 1,
+        -quality,
+        result.url,
+    )
 
 
 def classify_evidence_path(

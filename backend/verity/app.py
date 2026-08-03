@@ -170,6 +170,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             Extractor(state.client, max_text=800),
             int(env("VERITY_CONCURRENCY", "1")),
             search_cost,
+            int(env("VERITY_SEARCH_QUERIES_PER_QUESTION", "3")),
+            int(env("VERITY_SEARCH_RESULTS_PER_QUERY", "6")),
         ),
         Critic(model),
         Writer(model),

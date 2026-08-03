@@ -11,6 +11,7 @@ from verity.orchestrator import (
     Executor,
     UsageRecorder,
     assess_trust,
+    build_search_queries,
     classify_evidence_path,
     classify_source,
     enforce_critic_decision,
@@ -124,6 +125,18 @@ async def test_executor_persists_subquestion_exception_as_failed_finding() -> No
 
 def test_official_documentation_receives_primary_source_weight() -> None:
     assert classify_source("fastapi.tiangolo.com") == ("documentation", 95)
+
+
+def test_search_queries_cover_primary_and_research_evidence() -> None:
+    queries = build_search_queries("climate adaptation policy", 3)
+    assert queries[0] == "climate adaptation policy"
+    assert "official documentation standard" in queries[1]
+    assert "research paper evidence review" in queries[2]
+
+
+def test_research_and_validated_domains_are_prioritized() -> None:
+    assert classify_source("pubmed.ncbi.nlm.nih.gov") == ("research", 90)
+    assert classify_source("example.gov") == ("government", 95)
 
 
 def test_mixed_replan_evidence_is_qualified_instead_of_collapsed() -> None:
