@@ -478,8 +478,8 @@ def build_search_queries(query: str, limit: int) -> list[str]:
     """Create complementary searches that favor primary and validated evidence."""
     variants = [
         query,
-        f"{query} official government guidance site:.gov",
-        f"{query} systematic review meta-analysis PubMed site:pubmed.ncbi.nlm.nih.gov",
+        f"{query} official government guidance",
+        f"{query} systematic review meta-analysis PubMed research",
     ]
     return list(dict.fromkeys(item[:180].strip() for item in variants[: max(1, limit)]))
 

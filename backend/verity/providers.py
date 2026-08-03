@@ -257,6 +257,78 @@ class SearXNGProvider:
         return results
 
 
+class OpenAlexProvider:
+    """Keyless scholarly-search fallback backed by OpenAlex works metadata."""
+
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        self.client = client
+
+    async def search(self, query: str, max_results: int) -> list[SearchResult]:
+        response = await self.client.get(
+            "https://api.openalex.org/works",
+            params={"search": query, "per-page": max_results, "filter": "has_abstract:true"},
+            headers={"Accept": "application/json", "User-Agent": "Verity/2.0"},
+        )
+        if not response.is_success:
+            raise ProviderHTTPError(response.status_code, "OpenAlex search failed")
+        results: list[SearchResult] = []
+        for work in response.json().get("results", []):
+            location = work.get("primary_location") or {}
+            url = str(location.get("landing_page_url") or work.get("doi") or "").strip()
+            if not url.startswith(("http://", "https://")):
+                continue
+            abstract = work.get("abstract_inverted_index") or {}
+            indexed_words = {
+                position: word
+                for word, positions in abstract.items()
+                for position in positions
+            }
+            words = [word for _, word in sorted(indexed_words.items())]
+            results.append(
+                SearchResult(
+                    title=str(work.get("title", "")).strip(),
+                    url=url,
+                    description=" ".join(words[:180]),
+                )
+            )
+        return results
+
+
+class CompositeSearchProvider:
+    def __init__(self, primary: SearchProvider, scholarly: SearchProvider) -> None:
+        self.primary = primary
+        self.scholarly = scholarly
+
+    async def search(self, query: str, max_results: int) -> list[SearchResult]:
+        primary_error: Exception | None = None
+        try:
+            results = await self.primary.search(query, max_results)
+        except Exception as error:
+            primary_error = error
+            results = []
+        if not any(
+            marker in query.lower()
+            for marker in ("research", "systematic review", "meta-analysis", "pubmed")
+        ):
+            if results:
+                return results
+            if primary_error:
+                raise primary_error
+            return []
+        try:
+            scholarly = await self.scholarly.search(query, max_results)
+        except Exception:
+            scholarly = []
+        merged: dict[str, SearchResult] = {item.url.rstrip("/"): item for item in results}
+        for item in scholarly:
+            merged.setdefault(item.url.rstrip("/"), item)
+        if merged:
+            return list(merged.values())
+        if primary_error:
+            raise primary_error
+        raise RuntimeError(f'No usable research results for "{query}"')
+
+
 class BraveProvider:
     def __init__(self, api_key: str, client: httpx.AsyncClient) -> None:
         self.api_key = api_key
