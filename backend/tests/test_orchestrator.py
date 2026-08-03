@@ -3,7 +3,9 @@ import pytest
 from verity.models import (
     Contradiction,
     CriticOutput,
+    Document,
     Finding,
+    SearchResult,
     SourceEvidence,
     SubQuestion,
 )
@@ -15,6 +17,8 @@ from verity.orchestrator import (
     classify_evidence_path,
     classify_source,
     enforce_critic_decision,
+    is_relevant_document,
+    select_source_candidates,
     validate_report,
 )
 
@@ -137,6 +141,35 @@ def test_search_queries_cover_primary_and_research_evidence() -> None:
 def test_research_and_validated_domains_are_prioritized() -> None:
     assert classify_source("pubmed.ncbi.nlm.nih.gov") == ("research", 90)
     assert classify_source("example.gov") == ("government", 95)
+
+
+def test_source_candidates_prefer_trusted_domains() -> None:
+    results = [
+        SearchResult(title="Generic blog", url="https://blog.example/a"),
+        SearchResult(title="Research paper", url="https://www.nature.com/articles/a"),
+    ]
+    assert [item.url for item in select_source_candidates(results)] == [
+        "https://www.nature.com/articles/a"
+    ]
+
+
+def test_irrelevant_boilerplate_is_rejected() -> None:
+    assert not is_relevant_document(
+        Document(
+            url="https://pmc.ncbi.nlm.nih.gov/articles/PMC7544061",
+            title="Checking your browser",
+            text="Please complete the CAPTCHA challenge to continue.",
+        ),
+        "urban tree planting reducing summer heat",
+    )
+    assert is_relevant_document(
+        Document(
+            url="https://journals.plos.org/plosone/article?id=1",
+            title="Urban tree planting and summer heat",
+            text="This study evaluates cooling from urban tree planting.",
+        ),
+        "urban tree planting reducing summer heat",
+    )
 
 
 def test_mixed_replan_evidence_is_qualified_instead_of_collapsed() -> None:

@@ -305,14 +305,19 @@ class Executor:
                                 )
                     results = sorted(collected.values(), key=source_result_priority)
                     self.cache.set_search(cache_key, results)
+                candidate_results = select_source_candidates(results)
                 page_results = await asyncio.gather(
-                    *(self._fetch_result(item) for item in results)
+                    *(self._fetch_result(item) for item in candidate_results)
                 )
-                documents = [item[0] for item in page_results if item[0] is not None]
+                relevant_pages = [
+                    item
+                    for item in page_results
+                    if item[0] is not None and is_relevant_document(item[0], sub.question)
+                ]
+                documents = [item[0] for item in relevant_pages]
                 titles = {
                     item[0].url: item[1]
-                    for item in page_results
-                    if item[0] is not None
+                    for item in relevant_pages
                 }
                 direct_failures = sum(1 for item in page_results if item[2])
                 sources = (
@@ -320,10 +325,10 @@ class Executor:
                     if documents
                     else []
                 )
-                rejected = len(documents) - len(sources)
+                rejected = len(candidate_results) - len(documents) + len(documents) - len(sources)
                 status, error = classify_evidence_path(
                     sources,
-                    len(results),
+                    len(candidate_results),
                     direct_failures,
                     rejected,
                 )
@@ -488,6 +493,40 @@ def source_result_priority(result: SearchResult) -> tuple[int, int, str]:
         -quality,
         result.url,
     )
+
+
+def select_source_candidates(results: list[SearchResult], limit: int = 12) -> list[SearchResult]:
+    """Prefer trusted source classes while retaining a fallback for niche topics."""
+    trusted = [
+        result
+        for result in results
+        if classify_source((urlparse(result.url).hostname or "").lower().removeprefix("www."))[1]
+        >= 80
+    ]
+    return (trusted or results)[:limit]
+
+
+def _evidence_terms(value: str) -> set[str]:
+    words = re.findall(r"[a-z0-9]{4,}", value.lower())
+    stop_words = {
+        "about", "after", "been", "being", "does", "from", "have", "into",
+        "main", "more", "most", "that", "their", "them", "these", "what",
+        "when", "which", "with", "will", "your",
+    }
+    return {word.rstrip("s") for word in words if word not in stop_words}
+
+
+def is_relevant_document(document: Document, question: str) -> bool:
+    """Reject boilerplate and unrelated search pages before LLM summarization."""
+    question_terms = _evidence_terms(question)
+    if not question_terms:
+        return bool(document.text.strip())
+    document_terms = _evidence_terms(
+        f"{document.title} {document.url} {document.text[:1200]}"
+    )
+    overlap = question_terms & document_terms
+    required = 1 if len(question_terms) == 1 else 2
+    return len(overlap) >= required
 
 
 def classify_evidence_path(
