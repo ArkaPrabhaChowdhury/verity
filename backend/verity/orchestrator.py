@@ -523,6 +523,18 @@ def is_relevant_document(document: Document, question: str) -> bool:
         return bool(document.text.strip())
     document_text = f"{document.title} {document.url} {document.text[:1200]}"
     document_terms = _evidence_terms(document_text)
+    generic_terms = {
+        "about", "adult", "adults", "after", "current", "does", "effect",
+        "effects", "evidence", "find", "finding", "findings", "health", "main",
+        "research", "review", "reviews", "say", "study", "studies", "what",
+    }
+    substantive_terms = [
+        word.rstrip("s")
+        for word in re.findall(r"[a-z0-9]{4,}", question.lower())
+        if word not in generic_terms
+    ]
+    if len(substantive_terms) >= 2 and not set(substantive_terms[:2]) <= document_terms:
+        return False
     overlap = question_terms & document_terms
     if len(overlap) >= 3:
         return True

@@ -178,6 +178,14 @@ def test_irrelevant_boilerplate_is_rejected() -> None:
         ),
         "intermittent fasting for weight loss in adults",
     )
+    assert not is_relevant_document(
+        Document(
+            url="https://doi.org/10.1234/exercise",
+            title="Effects of high-intensity interval training on cardiometabolic health",
+            text="A systematic review of exercise and body weight outcomes.",
+        ),
+        "intermittent fasting for weight loss in adults",
+    )
 
 
 def test_mixed_replan_evidence_is_qualified_instead_of_collapsed() -> None:
