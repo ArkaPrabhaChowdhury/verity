@@ -134,8 +134,8 @@ def test_official_documentation_receives_primary_source_weight() -> None:
 def test_search_queries_cover_primary_and_research_evidence() -> None:
     queries = build_search_queries("climate adaptation policy", 3)
     assert queries[0] == "climate adaptation policy"
-    assert "official documentation standard" in queries[1]
-    assert "research paper evidence review" in queries[2]
+    assert "official government guidance" in queries[1]
+    assert "systematic review meta-analysis PubMed" in queries[2]
 
 
 def test_research_and_validated_domains_are_prioritized() -> None:
