@@ -18,6 +18,7 @@ from verity.orchestrator import (
     classify_source,
     enforce_critic_decision,
     is_relevant_document,
+    sanitize_report_urls,
     select_source_candidates,
     validate_report,
 )
@@ -307,3 +308,16 @@ def test_report_rejects_unknown_urls() -> None:
     )
     with pytest.raises(ValueError, match="unknown URL"):
         validate_report(report, {"https://known.example"})
+
+
+def test_report_sanitizer_removes_unknown_urls() -> None:
+    report = (
+        "**Direct answer:** Supported [1]. See https://unknown.example for context.\n\n"
+        "## References\n1. https://known.example\n\n"
+        "## Gaps & Caveats\nNone."
+    )
+
+    sanitized = sanitize_report_urls(report, {"https://known.example"})
+
+    assert "unknown.example" not in sanitized
+    assert "https://known.example" in sanitized

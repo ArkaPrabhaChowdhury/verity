@@ -634,11 +634,12 @@ class Critic:
                 raise ValueError("critic coverage does not match planned questions")
             if value.decision == "RE_PLAN" and not value.notes_for_replan.strip():
                 raise ValueError("notes_for_replan required")
-            for contradiction in value.contradictions:
-                if len(contradiction.source_urls) < 2 or any(
-                    url not in allowed_urls for url in contradiction.source_urls
-                ):
-                    raise ValueError("contradiction references invalid sources")
+            value.contradictions = [
+                contradiction
+                for contradiction in value.contradictions
+                if len(contradiction.source_urls) >= 2
+                and all(url in allowed_urls for url in contradiction.source_urls)
+            ]
 
         payload = {
             "question": question,
@@ -803,7 +804,7 @@ class Writer:
                 return report
             except ValueError as error:
                 if attempt:
-                    raise
+                    return sanitize_report_urls(report, allowed_urls)
                 request.prompt = (
                     f"{payload}\n\nYour previous report was invalid: {error}. "
                     "Rewrite the full report and satisfy every section and citation rule."
@@ -822,6 +823,18 @@ def validate_report(report: str, allowed_urls: set[str]) -> None:
     for raw_url in REPORT_URL_PATTERN.findall(report):
         if raw_url.rstrip(".,;:") not in allowed_urls:
             raise ValueError(f"report cites unknown URL {raw_url!r}")
+
+
+def sanitize_report_urls(report: str, allowed_urls: set[str]) -> str:
+    """Remove hallucinated bare URLs while preserving the cited report structure."""
+    if not allowed_urls:
+        return report
+    return REPORT_URL_PATTERN.sub(
+        lambda match: match.group(0)
+        if match.group(0).rstrip(".,;:") in allowed_urls
+        else "",
+        report,
+    )
 
 
 class Engine:
