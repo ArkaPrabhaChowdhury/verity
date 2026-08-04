@@ -60,7 +60,7 @@ The local SearXNG JSON API is bound to `127.0.0.1:8888`, and the backend reaches
 
 To use Brave instead, set `VERITY_SEARCH_PROVIDER=brave` and add `BRAVE_SEARCH_API_KEY`. Its current $0.005/request estimate is selected automatically unless `VERITY_SEARCH_COST_PER_QUERY` overrides it. Provider selection does not alter orchestration code.
 
-Each sub-question searches three complementary query variants by default and retrieves up to six results per variant. Set `VERITY_SEARCH_QUERIES_PER_QUESTION` and `VERITY_SEARCH_RESULTS_PER_QUERY` to tune breadth and search cost. Results from government, official documentation, standards, and established research domains are ranked before generic web pages; this is a source-quality heuristic, not proof that a paper is peer-reviewed or that a document is correct.
+Each sub-question searches four complementary query variants by default and retrieves up to ten results per variant, with up to 24 candidates fetched for relevance checks. Set `VERITY_SEARCH_QUERIES_PER_QUESTION`, `VERITY_SEARCH_RESULTS_PER_QUERY`, and `VERITY_EVIDENCE_TIMEOUT_SECONDS` to tune breadth, search cost, and the evidence timeout. A failed query variant no longer aborts successful variants. Results from government, official documentation, standards, and established research domains are ranked before generic web pages; this is a source-quality heuristic, not proof that a paper is peer-reviewed or that a document is correct.
 
 ## API
 

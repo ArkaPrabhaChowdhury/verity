@@ -16,6 +16,7 @@ from verity.orchestrator import (
     build_search_queries,
     classify_evidence_path,
     classify_source,
+    diagnose_evidence,
     enforce_critic_decision,
     is_relevant_document,
     sanitize_report_urls,
@@ -51,6 +52,67 @@ def test_trust_is_inconclusive_without_successful_evidence() -> None:
     )
     assert trust.status == "inconclusive"
     assert trust.score <= 30
+
+
+def test_trust_diagnoses_retrieval_failure() -> None:
+    trust = assess_trust(
+        [
+            Finding(
+                sub_question_id="q1",
+                question="Question",
+                status="failed",
+                error="search unavailable",
+                round=0,
+            )
+        ],
+        [],
+    )
+    assert trust.diagnosis == "retrieval_failed"
+    assert "retrieval" in trust.summary
+
+
+def test_trust_diagnoses_filtered_evidence() -> None:
+    diagnosis = diagnose_evidence(
+        [],
+        contradictions=False,
+        candidates=6,
+        fetched=6,
+        relevant=0,
+        retained=0,
+        direct_failures=0,
+        rejected=6,
+        errors=[],
+    )
+    assert diagnosis == "evidence_filtered"
+
+
+def test_trust_diagnoses_exhausted_expanded_search_only_after_broad_funnel() -> None:
+    diagnosis = diagnose_evidence(
+        [Finding(sub_question_id="q1", question="Question", status="failed", round=0)],
+        contradictions=False,
+        candidates=24,
+        fetched=24,
+        relevant=0,
+        retained=0,
+        direct_failures=0,
+        rejected=24,
+        errors=[],
+    )
+    assert diagnosis == "not_found_after_expanded_search"
+
+
+def test_trust_diagnoses_source_conflict_before_coverage_gaps() -> None:
+    assert diagnose_evidence(
+        [],
+        contradictions=True,
+        candidates=0,
+        fetched=0,
+        relevant=0,
+        retained=0,
+        direct_failures=0,
+        rejected=0,
+        errors=["search unavailable"],
+    ) == "source_conflict"
 
 
 def test_trust_verifies_independent_successful_evidence() -> None:
@@ -151,6 +213,9 @@ def test_search_queries_cover_primary_and_research_evidence() -> None:
     assert queries[0] == "climate adaptation policy"
     assert "systematic review meta-analysis" in queries[1]
     assert "PubMed peer reviewed research" in queries[2]
+    assert "official guidance guideline evidence" in build_search_queries(
+        "climate adaptation policy", 4
+    )[3]
 
 
 def test_research_and_validated_domains_are_prioritized() -> None:
@@ -164,7 +229,8 @@ def test_source_candidates_prefer_trusted_domains() -> None:
         SearchResult(title="Research paper", url="https://www.nature.com/articles/a"),
     ]
     assert [item.url for item in select_source_candidates(results)] == [
-        "https://www.nature.com/articles/a"
+        "https://www.nature.com/articles/a",
+        "https://blog.example/a",
     ]
 
 

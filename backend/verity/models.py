@@ -12,6 +12,14 @@ def utc_now() -> datetime:
 
 RunStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 FindingStatus = Literal["success", "partial", "failed"]
+EvidenceDiagnosis = Literal[
+    "none",
+    "retrieval_failed",
+    "evidence_filtered",
+    "evidence_thin",
+    "source_conflict",
+    "not_found_after_expanded_search",
+]
 
 
 class SubQuestion(BaseModel):
@@ -85,6 +93,7 @@ class TrustAssessment(BaseModel):
     independent_domains: int = 0
     independent_sources: int = 0
     has_contradictions: bool = False
+    diagnosis: EvidenceDiagnosis = "none"
 
 
 class LLMCallMetadata(BaseModel):

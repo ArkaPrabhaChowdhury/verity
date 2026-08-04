@@ -76,6 +76,7 @@ export type TrustAssessment = {
   independent_domains: number;
   independent_sources: number;
   has_contradictions: boolean;
+  diagnosis: "none" | "retrieval_failed" | "evidence_filtered" | "evidence_thin" | "source_conflict" | "not_found_after_expanded_search";
 };
 
 export type RunEvent = {

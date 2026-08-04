@@ -244,8 +244,9 @@ class Executor:
         extractor: Extractor,
         concurrency: int,
         search_cost_per_query: float,
-        search_queries_per_question: int = 3,
-        search_results_per_query: int = 6,
+        search_queries_per_question: int = 4,
+        search_results_per_query: int = 10,
+        evidence_timeout_seconds: int = 120,
     ) -> None:
         self.llm = llm
         self.search = search
@@ -254,6 +255,7 @@ class Executor:
         self.search_cost_per_query = search_cost_per_query
         self.search_queries_per_question = max(1, search_queries_per_question)
         self.search_results_per_query = max(1, search_results_per_query)
+        self.evidence_timeout_seconds = max(30, evidence_timeout_seconds)
         self.cache = EvidenceCache()
 
     async def execute(
@@ -285,8 +287,9 @@ class Executor:
         documents: list[Document] = []
         sources: list[SourceEvidence] = []
         rejected = 0
+        search_errors: list[str] = []
         try:
-            async with asyncio.timeout(60):
+            async with asyncio.timeout(self.evidence_timeout_seconds):
                 query = sub.search_query.strip() or sub.question.strip().rstrip("?")
                 query_variants = build_search_queries(query, self.search_queries_per_question)
                 cache_key = f"{'|'.join(query_variants)}|{self.search_results_per_query}"
@@ -295,12 +298,16 @@ class Executor:
                     collected: dict[str, SearchResult] = {}
                     for search_query in query_variants:
                         recorder.record_search(self.search_cost_per_query)
-                        variant_results = await retry_transient(
-                            lambda search_query=search_query: self.search.search(
-                                search_query, self.search_results_per_query
-                            ),
-                            max_attempts=2,
-                        )
+                        try:
+                            variant_results = await retry_transient(
+                                lambda search_query=search_query: self.search.search(
+                                    search_query, self.search_results_per_query
+                                ),
+                                max_attempts=2,
+                            )
+                        except Exception as exception:
+                            search_errors.append(str(exception))
+                            continue
                         for result in variant_results:
                             normalized_url = result.url.rstrip("/")
                             if normalized_url and normalized_url not in collected:
@@ -308,6 +315,8 @@ class Executor:
                                     update={"url": normalized_url}
                                 )
                     results = sorted(collected.values(), key=source_result_priority)
+                    if not results and search_errors:
+                        raise RuntimeError("; ".join(dict.fromkeys(search_errors)))
                     self.cache.set_search(cache_key, results)
                 candidate_results = select_source_candidates(results)
                 page_results = await asyncio.gather(
@@ -336,6 +345,12 @@ class Executor:
                     direct_failures,
                     rejected,
                 )
+                if search_errors:
+                    error = f"{error}; " if error else ""
+                    error += (
+                        f"{len(search_errors)} search variants failed: "
+                        f"{'; '.join(dict.fromkeys(search_errors))}"
+                    )
         except Exception as exception:
             status, sources = "failed", []
             error = str(exception)
@@ -511,15 +526,9 @@ def source_result_priority(result: SearchResult) -> tuple[int, int, str]:
     )
 
 
-def select_source_candidates(results: list[SearchResult], limit: int = 16) -> list[SearchResult]:
+def select_source_candidates(results: list[SearchResult], limit: int = 24) -> list[SearchResult]:
     """Prefer trusted source classes while retaining a fallback for niche topics."""
-    trusted = [
-        result
-        for result in results
-        if classify_source((urlparse(result.url).hostname or "").lower().removeprefix("www."))[1]
-        >= 80
-    ]
-    return (trusted or results)[:limit]
+    return sorted(results, key=source_result_priority)[:limit]
 
 
 def source_independence_key(url: str) -> str:
@@ -682,8 +691,9 @@ def assess_trust(
         return TrustAssessment(
             status="inconclusive",
             score=0,
-            summary="No evidence was available to assess.",
+            summary="The research run did not produce findings to assess.",
             reasons=["The run produced no research findings."],
+            diagnosis="retrieval_failed",
         )
 
     successful = sum(item.status == "success" for item in findings)
@@ -702,6 +712,24 @@ def assess_trust(
     }
     contradictions = any(item.contradictions for item in critiques)
     forced_proceed = any(item.forced_proceed for item in critiques)
+    candidates = sum(item.candidate_count for item in findings)
+    fetched = sum(item.fetched_count for item in findings)
+    relevant = sum(item.relevant_count for item in findings)
+    retained = sum(item.retained_count for item in findings)
+    direct_failures = sum(item.direct_fetch_failures for item in findings)
+    rejected = sum(item.rejected_count for item in findings)
+    errors = [item.error for item in findings if item.error]
+    diagnosis = diagnose_evidence(
+        findings,
+        contradictions=contradictions,
+        candidates=candidates,
+        fetched=fetched,
+        relevant=relevant,
+        retained=retained,
+        direct_failures=direct_failures,
+        rejected=rejected,
+        errors=errors,
+    )
     source_scores = [
         source.quality_score for item in findings for source in item.sources
     ]
@@ -748,8 +776,8 @@ def assess_trust(
         status = "verified"
     summaries = {
         "verified": "Evidence coverage passed Verity's deterministic trust gate.",
-        "qualified": "The answer is usable with material qualifications.",
-        "inconclusive": "Evidence is insufficient for a confident direct answer.",
+        "qualified": "The best available evidence is usable with material qualifications.",
+        "inconclusive": diagnosis_summary(diagnosis),
     }
     return TrustAssessment(
         status=status,
@@ -762,7 +790,63 @@ def assess_trust(
         independent_domains=len(domains),
         independent_sources=len(independent_sources),
         has_contradictions=contradictions,
+        diagnosis=diagnosis,
     )
+
+
+def diagnose_evidence(
+    findings: list[Finding],
+    *,
+    contradictions: bool,
+    candidates: int,
+    fetched: int,
+    relevant: int,
+    retained: int,
+    direct_failures: int,
+    rejected: int,
+    errors: list[str],
+) -> str:
+    """Explain why coverage is weak; do not imply that knowledge is absent."""
+    if contradictions:
+        return "source_conflict"
+    if errors and candidates == 0:
+        return "retrieval_failed"
+    if candidates == 0:
+        return "retrieval_failed"
+    if retained == 0 and relevant == 0 and rejected > 0:
+        # This label is reserved for a completed, broad funnel. A small or
+        # failed search remains an operational retrieval problem instead.
+        broad_search = candidates >= max(24, len(findings) * 8)
+        reliable_fetch = fetched > 0 and direct_failures <= max(1, candidates // 5)
+        if broad_search and reliable_fetch and not errors:
+            return "not_found_after_expanded_search"
+        return "evidence_filtered"
+    if retained == 0 and relevant > 0:
+        return "evidence_filtered"
+    if (
+        any(item.status in {"partial", "failed"} for item in findings)
+        or direct_failures
+        or retained < relevant
+    ):
+        return "evidence_thin"
+    return "none"
+
+
+def diagnosis_summary(diagnosis: str) -> str:
+    return {
+        "retrieval_failed": (
+            "The search or page-retrieval path failed before enough evidence "
+            "could be assessed."
+        ),
+        "evidence_filtered": "Sources were found, but relevance or quality checks rejected them.",
+        "evidence_thin": (
+            "The expanded search found relevant evidence, but coverage remains partial."
+        ),
+        "source_conflict": "Relevant sources were found but they do not agree.",
+        "not_found_after_expanded_search": (
+            "No relevant evidence was found after the expanded search scope completed."
+        ),
+    }.get(diagnosis, "Evidence coverage did not meet the confident-answer threshold.")
 
 
 class Writer:
