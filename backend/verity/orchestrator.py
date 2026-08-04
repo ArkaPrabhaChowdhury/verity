@@ -560,6 +560,12 @@ def is_relevant_document(document: Document, question: str) -> bool:
     document_domain = (urlparse(document.url).hostname or "").lower()
     if document_domain.endswith(("wiktionary.org", "dictionary.com", "merriam-webster.com")):
         return False
+    if re.search(
+        r"article locator error|article not available|page not found|access denied|captcha",
+        document_text,
+        re.IGNORECASE,
+    ):
+        return False
     animal_title = re.search(
         r"\banimal models?\b|\bmouse\b|\bmice\b|\brats?\b",
         document.title,

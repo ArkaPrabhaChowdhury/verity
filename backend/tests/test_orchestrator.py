@@ -283,6 +283,14 @@ def test_irrelevant_boilerplate_is_rejected() -> None:
         ),
         "urban tree planting reducing summer heat",
     )
+    assert not is_relevant_document(
+        Document(
+            url="https://linkinghub.elsevier.com/retrieve/pii/S0145414512001438",
+            title="Elsevier: Article Locator Error - Article Not Available",
+            text="The requested article is not available.",
+        ),
+        "home blood pressure monitoring hypertension management",
+    )
     assert is_relevant_document(
         Document(
             url="https://doi.org/10.1001/example",
