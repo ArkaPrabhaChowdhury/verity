@@ -181,14 +181,13 @@ class Planner:
             if not minimum <= len(value.sub_questions) <= maximum:
                 raise ValueError(f"expected {minimum}-{maximum} sub-questions")
             seen: set[str] = set()
-            prior = {item.question.strip().lower() for item in prior_findings}
             for item in value.sub_questions:
                 normalized = item.question.strip().lower()
                 if not all(
                     part.strip() for part in (item.question, item.search_query, item.rationale)
                 ):
                     raise ValueError("question, search_query, and rationale are required")
-                if len(item.search_query) > 180 or normalized in seen or normalized in prior:
+                if len(item.search_query) > 180 or normalized in seen:
                     raise ValueError("duplicate or invalid sub-question")
                 seen.add(normalized)
 
