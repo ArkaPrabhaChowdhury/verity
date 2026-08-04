@@ -97,7 +97,7 @@ def test_same_domain_sources_remain_partial() -> None:
         rejected=2,
     )
     assert status == "partial"
-    assert "1 independent domains" in error
+    assert "1 independent source identities" in error
 
 
 async def test_executor_persists_subquestion_exception_as_failed_finding() -> None:
@@ -131,11 +131,25 @@ def test_official_documentation_receives_primary_source_weight() -> None:
     assert classify_source("fastapi.tiangolo.com") == ("documentation", 95)
 
 
+def test_distinct_doi_sources_count_as_independent() -> None:
+    status, error = classify_evidence_path(
+        [
+            source("https://doi.org/10.1001/example", 90),
+            source("https://doi.org/10.1186/example", 90),
+        ],
+        result_count=4,
+        direct_failures=2,
+        rejected=0,
+    )
+    assert status == "success"
+    assert error == ""
+
+
 def test_search_queries_cover_primary_and_research_evidence() -> None:
     queries = build_search_queries("climate adaptation policy", 3)
     assert queries[0] == "climate adaptation policy"
-    assert "official government guidance" in queries[1]
-    assert "systematic review meta-analysis PubMed" in queries[2]
+    assert "systematic review meta-analysis" in queries[1]
+    assert "PubMed peer reviewed research" in queries[2]
 
 
 def test_research_and_validated_domains_are_prioritized() -> None:

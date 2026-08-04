@@ -46,6 +46,12 @@ class Finding(BaseModel):
     error: str = ""
     duration_ms: int = 0
     round: int
+    candidate_count: int = 0
+    fetched_count: int = 0
+    relevant_count: int = 0
+    retained_count: int = 0
+    direct_fetch_failures: int = 0
+    rejected_count: int = 0
 
 
 class CoverageAssessment(BaseModel):
@@ -77,6 +83,7 @@ class TrustAssessment(BaseModel):
     partial_findings: int = 0
     failed_findings: int = 0
     independent_domains: int = 0
+    independent_sources: int = 0
     has_contradictions: bool = False
 
 
@@ -102,6 +109,12 @@ class RunMetadata(BaseModel):
     search_queries: int = 0
     replan_occurred: bool = False
     outcomes: dict[str, int] = Field(default_factory=dict)
+    evidence_candidates: int = 0
+    evidence_fetched: int = 0
+    evidence_relevant: int = 0
+    evidence_retained: int = 0
+    evidence_direct_fetch_failures: int = 0
+    evidence_rejected: int = 0
 
 
 class RunOptions(BaseModel):

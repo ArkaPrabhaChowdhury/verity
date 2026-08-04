@@ -57,6 +57,25 @@ class Extractor:
         self.client = client
         self.max_text = max_text
 
+    async def resolve_url(self, raw_url: str) -> str:
+        """Return the final public URL even when its content cannot be extracted."""
+        current = raw_url
+        for _ in range(6):
+            await validate_public_url(current)
+            response = await self.client.get(
+                current,
+                headers={"User-Agent": "VerityResearchBot/2.0"},
+                follow_redirects=False,
+            )
+            if response.is_redirect:
+                location = response.headers.get("location")
+                if not location:
+                    raise RuntimeError("redirect missing location")
+                current = urljoin(current, location)
+                continue
+            return str(response.url)
+        raise RuntimeError("too many redirects")
+
     async def fetch(self, raw_url: str) -> Document:
         current = raw_url
         for _ in range(6):

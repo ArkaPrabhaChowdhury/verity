@@ -6,7 +6,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -281,6 +281,11 @@ class Executor:
 
     async def _execute_one(self, sub: SubQuestion, recorder: UsageRecorder) -> Finding:
         started = time.perf_counter()
+        candidate_results: list[SearchResult] = []
+        page_results: list[tuple[Document | None, str, bool]] = []
+        documents: list[Document] = []
+        sources: list[SourceEvidence] = []
+        rejected = 0
         try:
             async with asyncio.timeout(60):
                 query = sub.search_query.strip() or sub.question.strip().rstrip("?")
@@ -343,6 +348,12 @@ class Executor:
             error=error,
             duration_ms=int((time.perf_counter() - started) * 1000),
             round=sub.round,
+            candidate_count=len(candidate_results),
+            fetched_count=sum(1 for item in page_results if item[0] is not None),
+            relevant_count=len(documents),
+            retained_count=len(sources),
+            direct_fetch_failures=sum(1 for item in page_results if item[2]),
+            rejected_count=rejected,
         )
 
     async def _fetch_result(
@@ -365,9 +376,14 @@ class Executor:
         except Exception:
             snippet = result.description.strip()
             if len(snippet) >= 60:
+                canonical_url = result.url
+                try:
+                    canonical_url = await self.extractor.resolve_url(result.url)
+                except Exception:
+                    pass
                 return (
                     Document(
-                        url=result.url,
+                        url=canonical_url,
                         title=result.title,
                         text=f"Search result excerpt: {snippet}",
                     ),
@@ -478,8 +494,9 @@ def build_search_queries(query: str, limit: int) -> list[str]:
     """Create complementary searches that favor primary and validated evidence."""
     variants = [
         query,
-        f"{query} official government guidance",
-        f"{query} systematic review meta-analysis PubMed research",
+        f"{query} systematic review meta-analysis",
+        f"{query} PubMed peer reviewed research",
+        f"{query} official guidance guideline evidence",
     ]
     return list(dict.fromkeys(item[:180].strip() for item in variants[: max(1, limit)]))
 
@@ -495,7 +512,7 @@ def source_result_priority(result: SearchResult) -> tuple[int, int, str]:
     )
 
 
-def select_source_candidates(results: list[SearchResult], limit: int = 12) -> list[SearchResult]:
+def select_source_candidates(results: list[SearchResult], limit: int = 16) -> list[SearchResult]:
     """Prefer trusted source classes while retaining a fallback for niche topics."""
     trusted = [
         result
@@ -504,6 +521,16 @@ def select_source_candidates(results: list[SearchResult], limit: int = 12) -> li
         >= 80
     ]
     return (trusted or results)[:limit]
+
+
+def source_independence_key(url: str) -> str:
+    """Avoid treating distinct DOI records as one publisher domain."""
+    parsed = urlparse(url)
+    domain = (parsed.hostname or "").lower().removeprefix("www.")
+    if domain == "doi.org":
+        doi = unquote(parsed.path).lstrip("/").lower()
+        return f"doi:{doi}" if doi else domain
+    return domain or url.lower()
 
 
 def _evidence_terms(value: str) -> set[str]:
@@ -570,17 +597,13 @@ def classify_evidence_path(
             f"no usable evidence: {direct_failures} direct fetches failed; "
             f"{rejected} documents were irrelevant or unsupported",
         )
-    independent_domains = {
-        (source.domain or (urlparse(source.url).hostname or "")).removeprefix("www.")
-        for source in sources
-        if source.domain or urlparse(source.url).hostname
-    }
-    if len(sources) >= 2 and len(independent_domains) >= 2:
+    independent_sources = {source_independence_key(source.url) for source in sources}
+    if len(sources) >= 2 and len(independent_sources) >= 2:
         return "success", ""
     return (
         "partial",
         f"{len(sources)} of {result_count} sources produced usable evidence across "
-        f"{len(independent_domains)} independent domains; "
+        f"{len(independent_sources)} independent source identities; "
         f"{direct_failures} direct fetches used snippets or failed",
     )
 
@@ -670,6 +693,11 @@ def assess_trust(
         for source in item.sources
         if source.domain or urlparse(source.url).hostname
     }
+    independent_sources = {
+        source_independence_key(source.url)
+        for item in findings
+        for source in item.sources
+    }
     contradictions = any(item.contradictions for item in critiques)
     forced_proceed = any(item.forced_proceed for item in critiques)
     source_scores = [
@@ -691,9 +719,9 @@ def assess_trust(
     if not successful:
         score = min(score, 45)
         reasons.append("No research path met the full-support threshold.")
-    if len(domains) < 2:
+    if len(independent_sources) < 2:
         score = min(score, 30)
-        reasons.append("Fewer than two independent source domains were available.")
+        reasons.append("Fewer than two independent source identities were available.")
     if average_quality < 70:
         quality_penalty = min(15, 70 - average_quality)
         score -= quality_penalty
@@ -710,7 +738,7 @@ def assess_trust(
         )
 
     score = max(0, score)
-    if score < 50 or not successful or len(domains) < 2:
+    if score < 50 or not successful or len(independent_sources) < 2:
         status = "inconclusive"
     elif partial or failed or contradictions or forced_proceed or average_quality < 70:
         status = "qualified"
@@ -730,6 +758,7 @@ def assess_trust(
         partial_findings=partial,
         failed_findings=failed,
         independent_domains=len(domains),
+        independent_sources=len(independent_sources),
         has_contradictions=contradictions,
     )
 
@@ -933,6 +962,14 @@ class Engine:
                 await self.repository.save_run(run)
 
             run.trust = assess_trust(run.findings, run.critiques)
+            run.metadata.evidence_candidates = sum(item.candidate_count for item in run.findings)
+            run.metadata.evidence_fetched = sum(item.fetched_count for item in run.findings)
+            run.metadata.evidence_relevant = sum(item.relevant_count for item in run.findings)
+            run.metadata.evidence_retained = sum(item.retained_count for item in run.findings)
+            run.metadata.evidence_direct_fetch_failures = sum(
+                item.direct_fetch_failures for item in run.findings
+            )
+            run.metadata.evidence_rejected = sum(item.rejected_count for item in run.findings)
             await self.emit(run.id, "trust_assessed", run.trust)
             run.report = await timed(
                 "writing",
