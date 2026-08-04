@@ -572,6 +572,8 @@ def is_relevant_document(document: Document, question: str) -> bool:
     overlap = question_terms & document_terms
     if len(overlap) >= 3:
         return True
+    if document.text.startswith("Search result excerpt:") and len(overlap) >= 2:
+        return True
     question_phrases = {
         " ".join(pair)
         for pair in zip(
