@@ -333,16 +333,51 @@ class PubMedProvider:
         ]
 
 
+class CrossrefProvider:
+    """Keyless scholarly metadata fallback for cross-disciplinary research."""
+
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        self.client = client
+
+    async def search(self, query: str, max_results: int) -> list[SearchResult]:
+        response = await self.client.get(
+            "https://api.crossref.org/works",
+            params={"query.bibliographic": query, "rows": max_results},
+            headers={"Accept": "application/json", "User-Agent": "Verity/2.0"},
+        )
+        if not response.is_success:
+            raise ProviderHTTPError(response.status_code, "Crossref search failed")
+        results: list[SearchResult] = []
+        for item in response.json().get("message", {}).get("items", []):
+            title = str((item.get("title") or [""])[0]).strip()
+            doi = str(item.get("DOI", "")).strip()
+            if title and doi:
+                results.append(
+                    SearchResult(
+                        title=title,
+                        url=f"https://doi.org/{doi}",
+                        description="Crossref-indexed scholarly work.",
+                    )
+                )
+        return results
+
+
 class CompositeSearchProvider:
     def __init__(
         self,
         primary: SearchProvider,
         scholarly: SearchProvider,
-        additional_scholarly: SearchProvider | None = None,
+        additional_scholarly: SearchProvider | list[SearchProvider] | None = None,
     ) -> None:
         self.primary = primary
         self.scholarly = scholarly
-        self.additional_scholarly = additional_scholarly
+        self.additional_scholarly = (
+            []
+            if additional_scholarly is None
+            else additional_scholarly
+            if isinstance(additional_scholarly, list)
+            else [additional_scholarly]
+        )
 
     async def search(self, query: str, max_results: int) -> list[SearchResult]:
         primary_error: Exception | None = None
@@ -361,9 +396,7 @@ class CompositeSearchProvider:
                 raise primary_error
             return []
         scholarly: list[SearchResult] = []
-        for provider in (self.scholarly, self.additional_scholarly):
-            if provider is None:
-                continue
+        for provider in [self.scholarly, *self.additional_scholarly]:
             try:
                 scholarly.extend(await provider.search(query, max_results))
             except Exception:
