@@ -557,6 +557,9 @@ def is_relevant_document(document: Document, question: str) -> bool:
     if not question_terms:
         return bool(document.text.strip())
     document_text = f"{document.title} {document.url} {document.text[:1200]}"
+    document_domain = (urlparse(document.url).hostname or "").lower()
+    if document_domain.endswith(("wiktionary.org", "dictionary.com", "merriam-webster.com")):
+        return False
     animal_title = re.search(
         r"\banimal models?\b|\bmouse\b|\bmice\b|\brats?\b",
         document.title,
@@ -570,6 +573,8 @@ def is_relevant_document(document: Document, question: str) -> bool:
         "about", "adult", "adults", "after", "current", "does", "effect",
         "effects", "evidence", "find", "finding", "findings", "health", "main",
         "research", "review", "reviews", "say", "study", "studies", "what",
+        "compare", "comparison", "meta", "recent", "systematic",
+        "analysis", "continuous",
     }
     substantive_terms = [
         word.rstrip("s")

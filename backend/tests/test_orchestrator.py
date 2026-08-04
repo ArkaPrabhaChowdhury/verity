@@ -275,6 +275,28 @@ def test_irrelevant_boilerplate_is_rejected() -> None:
         ),
         "intermittent fasting for weight loss in adults",
     )
+    assert not is_relevant_document(
+        Document(
+            url="https://en.wiktionary.org/wiki/urban",
+            title="urban - Wiktionary",
+            text="A dictionary definition of the word urban.",
+        ),
+        "urban tree planting reducing summer heat",
+    )
+    assert is_relevant_document(
+        Document(
+            url="https://doi.org/10.1001/example",
+            title="Intermittent fasting versus continuous energy restriction for weight loss",
+            text=(
+                "A systematic review compares intermittent fasting with continuous "
+                "energy restriction in adults."
+            ),
+        ),
+        (
+            "How do systematic reviews compare intermittent fasting with continuous "
+            "energy restriction for weight loss in adults?"
+        ),
+    )
 
 
 def test_mixed_replan_evidence_is_qualified_instead_of_collapsed() -> None:
