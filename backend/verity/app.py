@@ -26,6 +26,7 @@ from .providers import (
     GeminiProvider,
     GroqProvider,
     OpenAlexProvider,
+    PubMedProvider,
     SearXNGProvider,
 )
 from .store import PostgresRepository, Repository, RunNotFound, SQLiteRepository
@@ -158,12 +159,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         search = CompositeSearchProvider(
             SearXNGProvider(env("SEARXNG_URL", "http://localhost:8888"), state.client),
             OpenAlexProvider(state.client),
+            PubMedProvider(state.client),
         )
         default_cost = 0.0
     elif search_name == "brave":
         search = CompositeSearchProvider(
             BraveProvider(env("BRAVE_SEARCH_API_KEY"), state.client),
             OpenAlexProvider(state.client),
+            PubMedProvider(state.client),
         )
         default_cost = 0.005
     else:
