@@ -24,7 +24,7 @@ export function EvidenceTable({ run, onSelectSource }: { run?: Run; onSelectSour
           <div className="critic-row" role="row">
             <span aria-hidden="true">↻</span>
             <div><strong>Critic decision: {latestCritique.decision === "RE_PLAN" ? "Re-plan needed" : "Proceed"}</strong><p>{latestCritique.notes_for_replan || coverageSummary(latestCritique.coverage_assessment ?? [])}</p></div>
-            <span className={`critic-state ${latestCritique.forced_proceed ? "danger" : ""}`}>{latestCritique.forced_proceed ? "Inconclusive" : latestCritique.decision === "RE_PLAN" ? "Re-planning" : "Reviewed"}</span>
+            <span className={`critic-state ${latestCritique.forced_proceed ? "danger" : ""}`}>{latestCritique.forced_proceed ? "Proceed with gaps" : latestCritique.decision === "RE_PLAN" ? "Re-planning" : "Reviewed"}</span>
           </div>
         ) : null}
       </div>

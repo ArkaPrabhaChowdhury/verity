@@ -56,6 +56,12 @@ export type RunMetadata = {
   search_queries: number;
   replan_occurred: boolean;
   outcomes: Partial<Record<FindingStatus, number>> | null;
+  evidence_candidates: number;
+  evidence_fetched: number;
+  evidence_relevant: number;
+  evidence_retained: number;
+  evidence_direct_fetch_failures: number;
+  evidence_rejected: number;
   llm_calls?: Array<{ stage: string; provider: string; model: string; prompt_tokens: number; completion_tokens: number; total_tokens: number; estimated_cost_usd: number; duration_ms: number }>;
 };
 
@@ -68,6 +74,7 @@ export type TrustAssessment = {
   partial_findings: number;
   failed_findings: number;
   independent_domains: number;
+  independent_sources: number;
   has_contradictions: boolean;
 };
 

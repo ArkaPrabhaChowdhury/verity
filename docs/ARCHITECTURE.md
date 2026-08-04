@@ -24,7 +24,7 @@ flowchart TD
     E -. events .-> SSE
     C -. events .-> SSE
     W -. events .-> SSE
-    P -. snapshots .-> DB[(Supabase Postgres)]
+    P -. snapshots .-> DB[(SQLite or optional Supabase Postgres)]
     E -. snapshots .-> DB
     C -. snapshots .-> DB
     W -. snapshots .-> DB
@@ -64,9 +64,9 @@ The Python extractor uses `httpx` and Beautiful Soup. It removes navigation, scr
 
 Each run is stored as one versioned JSON snapshot plus an append-only event table. An SSE connection subscribes before loading prior events, replays stored events in sequence, then ignores buffered duplicates by sequence number. This avoids missing events during the replay/live handoff.
 
-SQLite uses WAL and a five-second busy timeout for local development. Hosted runs use Supabase Postgres in a private `verity` schema. RLS is enabled with no client policies, and `anon`/`authenticated` receive no schema, table, or sequence privileges; only the server connection can persist or replay runs.
+SQLite uses WAL and a five-second busy timeout and is the current runtime. The repository also includes an optional Supabase-ready Postgres adapter targeting a private `verity` schema. Its migration enables RLS with no client policies and grants `anon`/`authenticated` no schema, table, or sequence privileges, so only a configured server connection could persist or replay runs.
 
-Async SQLite and Postgres adapters implement the same repository protocol. `VERITY_DATABASE_URL` selects Supabase for durable hosted state. Run deletion cascades to append-only events. Lifecycle endpoints support cancellation, retry, deletion, and direct timeline retrieval.
+Async SQLite and Postgres adapters implement the same repository protocol. `VERITY_DATABASE_URL` selects the optional Postgres path; without it, Verity uses SQLite. Run deletion cascades to append-only events. Lifecycle endpoints support cancellation, retry, deletion, and direct timeline retrieval.
 
 ## Runtime controls and observability
 
@@ -76,4 +76,4 @@ The HTTP layer bounds active execution with `VERITY_MAX_ACTIVE_RUNS`; overflow s
 
 ## Public deployment boundary
 
-Browser requests stay same-origin through the Next.js catch-all route handler. That server-only proxy injects the Render bearer token and streams upstream SSE bodies without buffering. Vercel stores `VERITY_API_URL` and `VERITY_API_TOKEN` as encrypted server environment variables; neither is compiled into the browser bundle. Render is therefore the compute boundary, while the private Supabase schema is the persistence boundary.
+Browser requests stay same-origin through the Next.js catch-all route handler. That server-only proxy injects the backend bearer token and streams upstream SSE bodies without buffering. Vercel stores `VERITY_API_URL` and `VERITY_API_TOKEN` as encrypted server environment variables; neither is compiled into the browser bundle. The backend is the compute boundary and SQLite is the current persistence boundary. A private Supabase schema would replace SQLite only when `VERITY_DATABASE_URL` is configured.

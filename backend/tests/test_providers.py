@@ -4,6 +4,7 @@ import pytest
 from verity.models import CompletionRequest, CompletionResponse
 from verity.providers import (
     FallbackProvider,
+    OpenAlexProvider,
     ProviderHTTPError,
     ProviderNotConfigured,
     SearXNGProvider,
@@ -59,3 +60,25 @@ async def test_searxng_filters_duplicates_and_invalid_urls() -> None:
     assert len(results) == 1
     assert results[0].title == "One"
 
+
+async def test_openalex_maps_scholarly_work_metadata() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["filter"] == "has_abstract:true"
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "A research paper",
+                        "doi": "https://doi.org/10.1234/example",
+                        "primary_location": {"landing_page_url": "https://doi.org/10.1234/example"},
+                        "abstract_inverted_index": {"Evidence": [0], "supports": [1]},
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        results = await OpenAlexProvider(client).search("research query", 3)
+    assert results[0].url == "https://doi.org/10.1234/example"
+    assert results[0].description == "Evidence supports"

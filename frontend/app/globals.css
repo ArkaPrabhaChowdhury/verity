@@ -202,8 +202,11 @@ button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 3px sol
 .report-content h1 { margin: 0 0 14px; font-size: 28px; }
 .report-content h2 { margin: 26px 0 8px; font-size: 23px; }
 .report-content h3 { margin: 20px 0 7px; font-size: 19px; }
-.report-content .gaps-heading { margin-bottom: 0; padding: 12px 14px 5px; border: 1px solid #d9b98e; border-bottom: 0; background: #fff9ef; }
-.report-content .gaps-heading + p { max-width: none; margin-top: 0; padding: 5px 14px 12px; border: 1px solid #d9b98e; border-top: 0; background: #fff9ef; }
+.report-content .gaps-heading { margin-bottom: 0; padding: 12px 16px 6px; border: 1px solid #d9b98e; border-bottom: 0; border-left: 4px solid var(--warning); background: #fff8eb; color: #482f12; }
+.report-content .gaps-heading + :is(p, ul, ol) { max-width: none; margin: 0 0 24px; padding: 6px 18px 14px 38px; border: 1px solid #d9b98e; border-top: 0; border-left: 4px solid var(--warning); background: #fff8eb; }
+.report-content .gaps-heading + p { padding-left: 16px; }
+.report-content .gaps-heading + :is(ul, ol) li { max-width: 72ch; }
+.report-content .gaps-heading + :is(ul, ol) li + li { margin-top: 5px; }
 .report-content p, .report-content li { max-width: 78ch; }
 .report-content a { color: var(--accent-dark); text-decoration-thickness: 1px; text-underline-offset: 2px; }
 .report-content code { font-family: var(--ui-font); }

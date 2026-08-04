@@ -6,7 +6,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -245,12 +245,16 @@ class Executor:
         extractor: Extractor,
         concurrency: int,
         search_cost_per_query: float,
+        search_queries_per_question: int = 3,
+        search_results_per_query: int = 6,
     ) -> None:
         self.llm = llm
         self.search = search
         self.extractor = extractor
         self.semaphore = asyncio.Semaphore(max(1, concurrency))
         self.search_cost_per_query = search_cost_per_query
+        self.search_queries_per_question = max(1, search_queries_per_question)
+        self.search_results_per_query = max(1, search_results_per_query)
         self.cache = EvidenceCache()
 
     async def execute(
@@ -277,25 +281,48 @@ class Executor:
 
     async def _execute_one(self, sub: SubQuestion, recorder: UsageRecorder) -> Finding:
         started = time.perf_counter()
+        candidate_results: list[SearchResult] = []
+        page_results: list[tuple[Document | None, str, bool]] = []
+        documents: list[Document] = []
+        sources: list[SourceEvidence] = []
+        rejected = 0
         try:
             async with asyncio.timeout(60):
                 query = sub.search_query.strip() or sub.question.strip().rstrip("?")
-                cache_key = f"{query}|4"
+                query_variants = build_search_queries(query, self.search_queries_per_question)
+                cache_key = f"{'|'.join(query_variants)}|{self.search_results_per_query}"
                 results = self.cache.get_search(cache_key)
                 if results is None:
-                    recorder.record_search(self.search_cost_per_query)
-                    results = await retry_transient(
-                        lambda: self.search.search(query, 4), max_attempts=2
-                    )
+                    collected: dict[str, SearchResult] = {}
+                    for search_query in query_variants:
+                        recorder.record_search(self.search_cost_per_query)
+                        variant_results = await retry_transient(
+                            lambda search_query=search_query: self.search.search(
+                                search_query, self.search_results_per_query
+                            ),
+                            max_attempts=2,
+                        )
+                        for result in variant_results:
+                            normalized_url = result.url.rstrip("/")
+                            if normalized_url and normalized_url not in collected:
+                                collected[normalized_url] = result.model_copy(
+                                    update={"url": normalized_url}
+                                )
+                    results = sorted(collected.values(), key=source_result_priority)
                     self.cache.set_search(cache_key, results)
+                candidate_results = select_source_candidates(results)
                 page_results = await asyncio.gather(
-                    *(self._fetch_result(item) for item in results)
+                    *(self._fetch_result(item) for item in candidate_results)
                 )
-                documents = [item[0] for item in page_results if item[0] is not None]
+                relevant_pages = [
+                    item
+                    for item in page_results
+                    if item[0] is not None and is_relevant_document(item[0], sub.question)
+                ]
+                documents = [item[0] for item in relevant_pages]
                 titles = {
                     item[0].url: item[1]
-                    for item in page_results
-                    if item[0] is not None
+                    for item in relevant_pages
                 }
                 direct_failures = sum(1 for item in page_results if item[2])
                 sources = (
@@ -303,24 +330,16 @@ class Executor:
                     if documents
                     else []
                 )
-                rejected = len(documents) - len(sources)
-                if not sources:
-                    status, error = (
-                        "failed",
-                        f"no usable evidence: {direct_failures} direct fetches failed; "
-                        f"{rejected} documents were irrelevant or unsupported",
-                    )
-                elif len(sources) < 2 or direct_failures or rejected:
-                    status, error = (
-                        "partial",
-                        f"{len(sources)} of {len(results)} sources produced usable evidence; "
-                        f"{direct_failures} direct fetches used snippets or failed",
-                    )
-                else:
-                    status, error = "success", ""
-        except Exception as error:
+                rejected = len(candidate_results) - len(documents) + len(documents) - len(sources)
+                status, error = classify_evidence_path(
+                    sources,
+                    len(candidate_results),
+                    direct_failures,
+                    rejected,
+                )
+        except Exception as exception:
             status, sources = "failed", []
-            error = str(error)
+            error = str(exception)
         return Finding(
             sub_question_id=sub.id,
             question=sub.question,
@@ -329,6 +348,12 @@ class Executor:
             error=error,
             duration_ms=int((time.perf_counter() - started) * 1000),
             round=sub.round,
+            candidate_count=len(candidate_results),
+            fetched_count=sum(1 for item in page_results if item[0] is not None),
+            relevant_count=len(documents),
+            retained_count=len(sources),
+            direct_fetch_failures=sum(1 for item in page_results if item[2]),
+            rejected_count=rejected,
         )
 
     async def _fetch_result(
@@ -351,9 +376,14 @@ class Executor:
         except Exception:
             snippet = result.description.strip()
             if len(snippet) >= 60:
+                canonical_url = result.url
+                try:
+                    canonical_url = await self.extractor.resolve_url(result.url)
+                except Exception:
+                    pass
                 return (
                     Document(
-                        url=result.url,
+                        url=canonical_url,
                         title=result.title,
                         text=f"Search result excerpt: {snippet}",
                     ),
@@ -417,11 +447,40 @@ class Executor:
 
 
 def classify_source(domain: str) -> tuple[str, int]:
-    if domain.endswith((".gov", ".gov.uk", ".europa.eu")):
+    domain = domain.lower().removeprefix("www.")
+    if domain in {"ncbi.nlm.nih.gov", "pubmed.ncbi.nlm.nih.gov"}:
+        return "research", 90
+    if domain.endswith((".gov", ".gov.uk", ".europa.eu", ".int")):
         return "government", 95
-    research_domains = ("nature.com", "sciencedirect.com")
-    if domain.endswith(".edu") or any(
-        value in domain for value in research_domains
+    if domain in {
+        "fastapi.tiangolo.com",
+        "docs.python.org",
+        "developer.mozilla.org",
+        "docs.docker.com",
+    }:
+        return "documentation", 95
+    if domain.startswith("docs.") or domain.endswith(".readthedocs.io"):
+        return "documentation", 85
+    if domain == "pypi.org":
+        return "registry", 80
+    research_domains = {
+        "acm.org",
+        "arxiv.org",
+        "bmj.com",
+        "cochranelibrary.com",
+        "doi.org",
+        "ieee.org",
+        "jamanetwork.com",
+        "nature.com",
+        "ncbi.nlm.nih.gov",
+        "plos.org",
+        "pubmed.ncbi.nlm.nih.gov",
+        "sciencedirect.com",
+        "springer.com",
+        "usenix.org",
+    }
+    if domain.endswith(".edu") or domain in research_domains or any(
+        domain.endswith(f".{value}") for value in research_domains
     ):
         return "research", 90
     if any(value in domain for value in ("reuters.com", "apnews.com", "bbc.")):
@@ -429,6 +488,124 @@ def classify_source(domain: str) -> tuple[str, int]:
     if any(value in domain for value in ("wikipedia.org", "medium.com", "blog")):
         return "secondary", 55
     return "web", 65
+
+
+def build_search_queries(query: str, limit: int) -> list[str]:
+    """Create complementary searches that favor primary and validated evidence."""
+    variants = [
+        query,
+        f"{query} systematic review meta-analysis",
+        f"{query} PubMed peer reviewed research",
+        f"{query} official guidance guideline evidence",
+    ]
+    return list(dict.fromkeys(item[:180].strip() for item in variants[: max(1, limit)]))
+
+
+def source_result_priority(result: SearchResult) -> tuple[int, int, str]:
+    domain = (urlparse(result.url).hostname or "").lower().removeprefix("www.")
+    source_type, quality = classify_source(domain)
+    # Stable ordering keeps cached and uncached runs reproducible.
+    return (
+        0 if source_type in {"government", "documentation", "research"} else 1,
+        -quality,
+        result.url,
+    )
+
+
+def select_source_candidates(results: list[SearchResult], limit: int = 16) -> list[SearchResult]:
+    """Prefer trusted source classes while retaining a fallback for niche topics."""
+    trusted = [
+        result
+        for result in results
+        if classify_source((urlparse(result.url).hostname or "").lower().removeprefix("www."))[1]
+        >= 80
+    ]
+    return (trusted or results)[:limit]
+
+
+def source_independence_key(url: str) -> str:
+    """Avoid treating distinct DOI records as one publisher domain."""
+    parsed = urlparse(url)
+    domain = (parsed.hostname or "").lower().removeprefix("www.")
+    if domain == "doi.org":
+        doi = unquote(parsed.path).lstrip("/").lower()
+        return f"doi:{doi}" if doi else domain
+    return domain or url.lower()
+
+
+def _evidence_terms(value: str) -> set[str]:
+    words = re.findall(r"[a-z0-9]{4,}", value.lower())
+    stop_words = {
+        "about", "after", "been", "being", "does", "from", "have", "into",
+        "main", "more", "most", "that", "their", "them", "these", "what",
+        "when", "which", "with", "will", "your",
+    }
+    return {word.rstrip("s") for word in words if word not in stop_words}
+
+
+def is_relevant_document(document: Document, question: str) -> bool:
+    """Reject boilerplate and unrelated search pages before LLM summarization."""
+    question_terms = _evidence_terms(question)
+    if not question_terms:
+        return bool(document.text.strip())
+    document_text = f"{document.title} {document.url} {document.text[:1200]}"
+    animal_title = re.search(
+        r"\banimal models?\b|\bmouse\b|\bmice\b|\brats?\b",
+        document.title,
+        re.IGNORECASE,
+    )
+    human_question = re.search(r"\badults?\b|\bhumans?\b", question, re.IGNORECASE)
+    if animal_title and human_question:
+        return False
+    document_terms = _evidence_terms(document_text)
+    generic_terms = {
+        "about", "adult", "adults", "after", "current", "does", "effect",
+        "effects", "evidence", "find", "finding", "findings", "health", "main",
+        "research", "review", "reviews", "say", "study", "studies", "what",
+    }
+    substantive_terms = [
+        word.rstrip("s")
+        for word in re.findall(r"[a-z0-9]{4,}", question.lower())
+        if word not in generic_terms
+    ]
+    if len(substantive_terms) >= 2 and not set(substantive_terms[:2]) <= document_terms:
+        return False
+    overlap = question_terms & document_terms
+    if len(overlap) >= 3:
+        return True
+    question_phrases = {
+        " ".join(pair)
+        for pair in zip(
+            re.findall(r"[a-z0-9]{4,}", question.lower()),
+            re.findall(r"[a-z0-9]{4,}", question.lower())[1:],
+            strict=False,
+        )
+    }
+    normalized_document = re.sub(r"[-/]", " ", document_text.lower())
+    return len(overlap) >= 2 and any(phrase in normalized_document for phrase in question_phrases)
+
+
+def classify_evidence_path(
+    sources: list[SourceEvidence],
+    result_count: int,
+    direct_failures: int,
+    rejected: int,
+) -> tuple[str, str]:
+    if not sources:
+        return (
+            "failed",
+            f"no usable evidence: {direct_failures} direct fetches failed; "
+            f"{rejected} documents were irrelevant or unsupported",
+        )
+    independent_sources = {source_independence_key(source.url) for source in sources}
+    if len(sources) >= 2 and len(independent_sources) >= 2:
+        return "success", ""
+    return (
+        "partial",
+        f"{len(sources)} of {result_count} sources produced usable evidence across "
+        f"{len(independent_sources)} independent source identities; "
+        f"{direct_failures} direct fetches used snippets or failed",
+    )
 
 
 def compact_excerpt(value: str, limit: int) -> str:
@@ -499,6 +676,14 @@ def enforce_critic_decision(output: CriticOutput, findings: list[Finding]) -> No
 def assess_trust(
     findings: list[Finding], critiques: list[CriticOutput]
 ) -> TrustAssessment:
+    if not findings:
+        return TrustAssessment(
+            status="inconclusive",
+            score=0,
+            summary="No evidence was available to assess.",
+            reasons=["The run produced no research findings."],
+        )
+
     successful = sum(item.status == "success" for item in findings)
     partial = sum(item.status == "partial" for item in findings)
     failed = sum(item.status == "failed" for item in findings)
@@ -508,27 +693,57 @@ def assess_trust(
         for source in item.sources
         if source.domain or urlparse(source.url).hostname
     }
+    independent_sources = {
+        source_independence_key(source.url)
+        for item in findings
+        for source in item.sources
+    }
     contradictions = any(item.contradictions for item in critiques)
-    status, score, reasons = "verified", 100, []
-    if not findings or failed or not successful:
-        status, score = "inconclusive", 25
-        reasons.append("No fully successful evidence path supports a confident answer.")
-    elif partial:
-        status, score = "qualified", score - min(45, partial * 10)
-        reasons.append(f"{partial} of {len(findings)} research paths have incomplete evidence.")
+    forced_proceed = any(item.forced_proceed for item in critiques)
+    source_scores = [
+        source.quality_score for item in findings for source in item.sources
+    ]
+    average_quality = round(sum(source_scores) / len(source_scores)) if source_scores else 0
+    total = len(findings)
+    score, reasons = 100, []
+
+    if partial:
+        penalty = round(40 * partial / total)
+        score -= penalty
+        reasons.append(
+            f"{partial} of {total} research paths had usable but incomplete evidence."
+        )
     if failed:
-        score -= min(30, failed * 15)
+        score -= round(50 * failed / total)
         reasons.append(f"{failed} research paths failed.")
-    if len(domains) < 2:
-        status, score = "inconclusive", min(score, 30)
-        reasons.append("Fewer than two independent source domains were available.")
+    if not successful:
+        score = min(score, 45)
+        reasons.append("No research path met the full-support threshold.")
+    if len(independent_sources) < 2:
+        score = min(score, 30)
+        reasons.append("Fewer than two independent source identities were available.")
+    if average_quality < 70:
+        quality_penalty = min(15, 70 - average_quality)
+        score -= quality_penalty
+        reasons.append(
+            f"Average retained source quality was moderate ({average_quality}/100)."
+        )
     if contradictions:
-        status = "qualified" if status == "verified" else status
         score -= 15
         reasons.append("The critic found unresolved contradictory evidence.")
-    if any(item.forced_proceed for item in critiques):
-        status, score = "inconclusive", min(score, 35)
-        reasons.append("The run reached its re-plan limit with unresolved gaps.")
+    if forced_proceed:
+        score -= 10
+        reasons.append(
+            "The run reached its re-plan limit; unresolved gaps remain reflected in the score."
+        )
+
+    score = max(0, score)
+    if score < 50 or not successful or len(independent_sources) < 2:
+        status = "inconclusive"
+    elif partial or failed or contradictions or forced_proceed or average_quality < 70:
+        status = "qualified"
+    else:
+        status = "verified"
     summaries = {
         "verified": "Evidence coverage passed Verity's deterministic trust gate.",
         "qualified": "The answer is usable with material qualifications.",
@@ -536,13 +751,14 @@ def assess_trust(
     }
     return TrustAssessment(
         status=status,
-        score=max(0, score),
+        score=score,
         summary=summaries[status],
         reasons=reasons,
         successful_findings=successful,
         partial_findings=partial,
         failed_findings=failed,
         independent_domains=len(domains),
+        independent_sources=len(independent_sources),
         has_contradictions=contradictions,
     )
 
@@ -746,6 +962,14 @@ class Engine:
                 await self.repository.save_run(run)
 
             run.trust = assess_trust(run.findings, run.critiques)
+            run.metadata.evidence_candidates = sum(item.candidate_count for item in run.findings)
+            run.metadata.evidence_fetched = sum(item.fetched_count for item in run.findings)
+            run.metadata.evidence_relevant = sum(item.relevant_count for item in run.findings)
+            run.metadata.evidence_retained = sum(item.retained_count for item in run.findings)
+            run.metadata.evidence_direct_fetch_failures = sum(
+                item.direct_fetch_failures for item in run.findings
+            )
+            run.metadata.evidence_rejected = sum(item.rejected_count for item in run.findings)
             await self.emit(run.id, "trust_assessed", run.trust)
             run.report = await timed(
                 "writing",

@@ -21,12 +21,15 @@ from .models import Event, Run, RunOptions, utc_now
 from .orchestrator import Critic, Engine, Executor, Planner, Writer
 from .providers import (
     BraveProvider,
+    CompositeSearchProvider,
     FallbackProvider,
     GeminiProvider,
     GroqProvider,
+    OpenAlexProvider,
     SearXNGProvider,
 )
 from .store import PostgresRepository, Repository, RunNotFound, SQLiteRepository
+from .token_budget import DEFAULT_TOKEN_BUDGET, TokenReducingProvider
 
 TERMINAL_EVENTS = {"report_completed", "run_failed", "run_cancelled"}
 
@@ -135,24 +138,33 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         timeout=httpx.Timeout(30, connect=10),
         limits=httpx.Limits(max_connections=30, max_keepalive_connections=10),
     )
-    model = FallbackProvider(
-        GroqProvider(
-            env("GROQ_API_KEY"),
-            env("GROQ_MODEL", "llama-3.1-8b-instant"),
-            state.client,
+    model = TokenReducingProvider(
+        FallbackProvider(
+            GroqProvider(
+                env("GROQ_API_KEY"),
+                env("GROQ_MODEL", "llama-3.1-8b-instant"),
+                state.client,
+            ),
+            GeminiProvider(
+                env("GEMINI_API_KEY"),
+                env("GEMINI_MODEL", "gemini-3.5-flash"),
+                state.client,
+            ),
         ),
-        GeminiProvider(
-            env("GEMINI_API_KEY"),
-            env("GEMINI_MODEL", "gemini-3.5-flash"),
-            state.client,
-        ),
+        int(env("VERITY_LLM_TOKEN_BUDGET", str(DEFAULT_TOKEN_BUDGET))),
     )
     search_name = env("VERITY_SEARCH_PROVIDER", "searxng").lower()
     if search_name == "searxng":
-        search = SearXNGProvider(env("SEARXNG_URL", "http://localhost:8888"), state.client)
+        search = CompositeSearchProvider(
+            SearXNGProvider(env("SEARXNG_URL", "http://localhost:8888"), state.client),
+            OpenAlexProvider(state.client),
+        )
         default_cost = 0.0
     elif search_name == "brave":
-        search = BraveProvider(env("BRAVE_SEARCH_API_KEY"), state.client)
+        search = CompositeSearchProvider(
+            BraveProvider(env("BRAVE_SEARCH_API_KEY"), state.client),
+            OpenAlexProvider(state.client),
+        )
         default_cost = 0.005
     else:
         raise RuntimeError("VERITY_SEARCH_PROVIDER must be searxng or brave")
@@ -166,6 +178,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             Extractor(state.client, max_text=800),
             int(env("VERITY_CONCURRENCY", "1")),
             search_cost,
+            int(env("VERITY_SEARCH_QUERIES_PER_QUESTION", "4")),
+            int(env("VERITY_SEARCH_RESULTS_PER_QUERY", "8")),
         ),
         Critic(model),
         Writer(model),
