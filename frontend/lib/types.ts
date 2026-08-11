@@ -1,4 +1,4 @@
-export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "dead_letter";
 export type FindingStatus = "success" | "partial" | "failed";
 
 export type SubQuestion = {
@@ -102,4 +102,9 @@ export type Run = {
   started_at?: string;
   completed_at?: string;
   options: { replan_enabled: boolean };
+  workspace_id?: string;
+  retry_count?: number;
+  queue_wait_ms?: number;
 };
+
+export type Telemetry = Record<string, number>;

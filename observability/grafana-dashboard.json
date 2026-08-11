@@ -1,0 +1,13 @@
+{
+  "title": "Verity Enterprise Research",
+  "schemaVersion": 39,
+  "refresh": "10s",
+  "panels": [
+    {"type":"stat","title":"Run latency p95 (ms)","targets":[{"expr":"verity_run_latency_p95_ms"}]},
+    {"type":"stat","title":"Queue wait p95 (ms)","targets":[{"expr":"verity_queue_wait_p95_ms"}]},
+    {"type":"stat","title":"Evidence retention","targets":[{"expr":"verity_evidence_retention_rate"}]},
+    {"type":"stat","title":"Average cost / run","targets":[{"expr":"verity_avg_cost_usd"}]},
+    {"type":"timeseries","title":"Trust downgrades and re-plans","targets":[{"expr":"verity_trust_downgrades_total"},{"expr":"verity_replans_total"}]},
+    {"type":"timeseries","title":"Fetch failures","targets":[{"expr":"verity_fetch_failures_total"}]}
+  ]
+}

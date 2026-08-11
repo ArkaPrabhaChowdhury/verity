@@ -93,7 +93,7 @@ Every new source record retains its domain, a deterministic extracted-text excer
 
 ## Production deployment
 
-SQLite is the current runtime and zero-setup default. The repository also supports optional Supabase Postgres through `VERITY_DATABASE_URL`; when configured, the application writes only to the private `verity` schema created by the tracked migration in `supabase/migrations`. Use the Supavisor session-pooler connection string for persistent IPv4 hosts. No Verity Supabase project is currently provisioned, so the deployed application does not use this optional path. `VERITY_MAX_ACTIVE_RUNS` bounds concurrent runs while additional work remains queued. Creation is limited to ten runs per client address per minute.
+SQLite is the zero-setup local default and Postgres is supported through `VERITY_DATABASE_URL`; when configured, the application writes only to the private `verity` schema created by the tracked migration in `supabase/migrations`. Production Compose uses Redis Streams (`VERITY_REDIS_URL`) with AOF persistence, consumer-group workers, lease reclamation, bounded retries, and a dead-letter stream. The database remains the source of truth for runs and evidence while Redis stores dispatch state. `VERITY_MAX_ACTIVE_RUNS` bounds concurrent runs while additional work remains queued. Creation is limited to ten runs per client address per minute.
 
 The Next.js route handler proxies API and SSE traffic server-side, so Vercel stores `VERITY_API_URL` and `VERITY_API_TOKEN` without exposing either to the browser. A genuinely multi-user product should still replace the shared deployment token with user authentication, authorization, and per-user quotas.
 

@@ -10,7 +10,7 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-RunStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
+RunStatus = Literal["queued", "running", "completed", "failed", "cancelled", "dead_letter"]
 FindingStatus = Literal["success", "partial", "failed"]
 EvidenceDiagnosis = Literal[
     "none",
@@ -145,6 +145,12 @@ class Run(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     options: RunOptions = Field(default_factory=RunOptions)
+    workspace_id: str = "default"
+    idempotency_key: str = ""
+    retry_count: int = 0
+    queue_wait_ms: int = 0
+    lease_owner: str = ""
+    lease_expires_at: datetime | None = None
 
 
 class Event(BaseModel):

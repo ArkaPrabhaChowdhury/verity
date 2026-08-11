@@ -13,6 +13,7 @@ const statusSymbol: Record<Run["status"], string> = {
   completed: "✓",
   failed: "!",
   cancelled: "×",
+  dead_letter: "!",
 };
 
 export function Sidebar({ runs, selectedID, onNew, onSelect }: SidebarProps) {

@@ -1,4 +1,4 @@
-import type { Run, RunEvent } from "./types";
+import type { Run, RunEvent, Telemetry } from "./types";
 
 export const API_URL = "/api/verity";
 
@@ -37,6 +37,10 @@ export async function getRun(id: string): Promise<Run> {
 export async function listRuns(): Promise<Run[]> {
   const data = await parseResponse<{ runs: Run[] }>(await fetch(`${API_URL}/api/runs?limit=50`, { cache: "no-store", headers: requestHeaders() }));
   return data.runs;
+}
+
+export async function getTelemetry(): Promise<Telemetry> {
+  return parseResponse<Telemetry>(await fetch(`${API_URL}/api/telemetry`, { cache: "no-store", headers: requestHeaders() }));
 }
 
 export async function listRunEvents(id: string): Promise<RunEvent[]> {
