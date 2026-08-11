@@ -60,7 +60,7 @@ The local SearXNG JSON API is bound to `127.0.0.1:8888`, and the backend reaches
 
 To use Brave instead, set `VERITY_SEARCH_PROVIDER=brave` and add `BRAVE_SEARCH_API_KEY`. Its current $0.005/request estimate is selected automatically unless `VERITY_SEARCH_COST_PER_QUERY` overrides it. Provider selection does not alter orchestration code.
 
-Each sub-question searches three complementary query variants by default and retrieves up to six results per variant. Set `VERITY_SEARCH_QUERIES_PER_QUESTION` and `VERITY_SEARCH_RESULTS_PER_QUERY` to tune breadth and search cost. Results from government, official documentation, standards, and established research domains are ranked before generic web pages; this is a source-quality heuristic, not proof that a paper is peer-reviewed or that a document is correct.
+Each sub-question searches four complementary query variants by default and retrieves up to ten results per variant, with up to 24 candidates fetched for relevance checks. Set `VERITY_SEARCH_QUERIES_PER_QUESTION`, `VERITY_SEARCH_RESULTS_PER_QUERY`, and `VERITY_EVIDENCE_TIMEOUT_SECONDS` to tune breadth, search cost, and the evidence timeout. A failed query variant no longer aborts successful variants. Results from government, official documentation, standards, and established research domains are ranked before generic web pages; this is a source-quality heuristic, not proof that a paper is peer-reviewed or that a document is correct.
 
 ## API
 
@@ -93,7 +93,7 @@ Every new source record retains its domain, a deterministic extracted-text excer
 
 ## Production deployment
 
-SQLite is the current runtime and zero-setup default. The repository also supports optional Supabase Postgres through `VERITY_DATABASE_URL`; when configured, the application writes only to the private `verity` schema created by the tracked migration in `supabase/migrations`. Use the Supavisor session-pooler connection string for persistent IPv4 hosts. No Verity Supabase project is currently provisioned, so the deployed application does not use this optional path. `VERITY_MAX_ACTIVE_RUNS` bounds concurrent runs while additional work remains queued. Creation is limited to ten runs per client address per minute.
+SQLite is the zero-setup local default and Postgres is supported through `VERITY_DATABASE_URL`; when configured, the application writes only to the private `verity` schema created by the tracked migration in `supabase/migrations`. Production Compose uses Redis Streams (`VERITY_REDIS_URL`) with AOF persistence, consumer-group workers, lease reclamation, bounded retries, and a dead-letter stream. The database remains the source of truth for runs and evidence while Redis stores dispatch state. `VERITY_MAX_ACTIVE_RUNS` bounds concurrent runs while additional work remains queued. Creation is limited to ten runs per client address per minute.
 
 The Next.js route handler proxies API and SSE traffic server-side, so Vercel stores `VERITY_API_URL` and `VERITY_API_TOKEN` without exposing either to the browser. A genuinely multi-user product should still replace the shared deployment token with user authentication, authorization, and per-user quotas.
 

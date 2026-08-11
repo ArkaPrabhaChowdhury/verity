@@ -10,8 +10,16 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-RunStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
+RunStatus = Literal["queued", "running", "completed", "failed", "cancelled", "dead_letter"]
 FindingStatus = Literal["success", "partial", "failed"]
+EvidenceDiagnosis = Literal[
+    "none",
+    "retrieval_failed",
+    "evidence_filtered",
+    "evidence_thin",
+    "source_conflict",
+    "not_found_after_expanded_search",
+]
 
 
 class SubQuestion(BaseModel):
@@ -85,6 +93,7 @@ class TrustAssessment(BaseModel):
     independent_domains: int = 0
     independent_sources: int = 0
     has_contradictions: bool = False
+    diagnosis: EvidenceDiagnosis = "none"
 
 
 class LLMCallMetadata(BaseModel):
@@ -136,6 +145,12 @@ class Run(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     options: RunOptions = Field(default_factory=RunOptions)
+    workspace_id: str = "default"
+    idempotency_key: str = ""
+    retry_count: int = 0
+    queue_wait_ms: int = 0
+    lease_owner: str = ""
+    lease_expires_at: datetime | None = None
 
 
 class Event(BaseModel):

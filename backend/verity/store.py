@@ -20,10 +20,12 @@ class Repository(Protocol):
     async def create_run(self, run: Run) -> None: ...
     async def save_run(self, run: Run) -> None: ...
     async def get_run(self, run_id: str) -> Run: ...
-    async def list_runs(self, limit: int) -> list[Run]: ...
+    async def list_runs(self, limit: int, workspace_id: str = "default") -> list[Run]: ...
     async def append_event(self, event: Event) -> None: ...
     async def list_events(self, run_id: str) -> list[Event]: ...
     async def delete_run(self, run_id: str) -> None: ...
+    async def find_idempotent_run(self, workspace_id: str, idempotency_key: str) -> Run | None: ...
+    async def recover_expired_runs(self) -> int: ...
 
 
 def _run_json(run: Run) -> str:
@@ -66,6 +68,18 @@ class SQLiteRepository:
             CREATE INDEX IF NOT EXISTS idx_run_events_run_seq ON run_events(run_id, seq);
             """
         )
+        async with self.db.execute("PRAGMA table_info(runs)") as cursor:
+            columns = {row[1] for row in await cursor.fetchall()}
+        for name, definition in {
+            "workspace_id": "TEXT NOT NULL DEFAULT 'default'",
+            "idempotency_key": "TEXT NOT NULL DEFAULT ''",
+        }.items():
+            if name not in columns:
+                await self.db.execute(f"ALTER TABLE runs ADD COLUMN {name} {definition}")
+        await self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_runs_workspace_key "
+            "ON runs(workspace_id, idempotency_key)"
+        )
         await self.db.commit()
 
     async def close(self) -> None:
@@ -80,9 +94,19 @@ class SQLiteRepository:
     async def create_run(self, run: Run) -> None:
         now = utc_now().isoformat()
         await self._database().execute(
-            "INSERT INTO runs(id,question,status,record_json,created_at,updated_at) "
-            "VALUES(?,?,?,?,?,?)",
-            (run.id, run.question, run.status, _run_json(run), run.created_at.isoformat(), now),
+            "INSERT INTO runs(id,question,status,record_json,created_at,updated_at,"
+            "workspace_id,idempotency_key) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (
+                run.id,
+                run.question,
+                run.status,
+                _run_json(run),
+                run.created_at.isoformat(),
+                now,
+                run.workspace_id,
+                run.idempotency_key,
+            ),
         )
         await self._database().commit()
 
@@ -102,10 +126,11 @@ class SQLiteRepository:
             raise RunNotFound(run_id)
         return _decode_record(row[0])
 
-    async def list_runs(self, limit: int) -> list[Run]:
+    async def list_runs(self, limit: int, workspace_id: str = "default") -> list[Run]:
         limit = limit if 1 <= limit <= 100 else 20
         async with self._database().execute(
-            "SELECT record_json FROM runs ORDER BY created_at DESC LIMIT ?", (limit,)
+            "SELECT record_json FROM runs WHERE workspace_id=? ORDER BY created_at DESC LIMIT ?",
+            (workspace_id, limit),
         ) as cursor:
             rows = await cursor.fetchall()
         return [_decode_record(row[0]) for row in rows]
@@ -146,6 +171,33 @@ class SQLiteRepository:
         if cursor.rowcount == 0:
             raise RunNotFound(run_id)
 
+    async def find_idempotent_run(self, workspace_id: str, idempotency_key: str) -> Run | None:
+        if not idempotency_key:
+            return None
+        async with self._database().execute(
+            "SELECT record_json FROM runs WHERE workspace_id=? AND idempotency_key=? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (workspace_id, idempotency_key),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return _decode_record(row[0]) if row else None
+
+    async def recover_expired_runs(self) -> int:
+        async with self._database().execute(
+            "SELECT record_json FROM runs WHERE status='running'"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        recovered = 0
+        for (raw,) in rows:
+            run = _decode_record(raw)
+            if run.lease_expires_at and run.lease_expires_at <= utc_now():
+                run.status = "queued"
+                run.lease_owner = ""
+                run.lease_expires_at = None
+                await self.save_run(run)
+                recovered += 1
+        return recovered
+
 
 class PostgresRepository:
     def __init__(self, dsn: str) -> None:
@@ -175,8 +227,9 @@ class PostgresRepository:
     async def create_run(self, run: Run) -> None:
         await self._pool().execute(
             """
-            INSERT INTO verity.runs(id,question,status,record_json,created_at,updated_at)
-            VALUES($1,$2,$3,$4::jsonb,$5,$6)
+            INSERT INTO verity.runs(id,question,status,record_json,created_at,updated_at,
+                workspace_id,idempotency_key)
+            VALUES($1,$2,$3,$4::jsonb,$5,$6,$7,$8)
             """,
             run.id,
             run.question,
@@ -184,6 +237,8 @@ class PostgresRepository:
             _run_json(run),
             run.created_at,
             utc_now(),
+            run.workspace_id,
+            run.idempotency_key,
         )
 
     async def save_run(self, run: Run) -> None:
@@ -208,10 +263,13 @@ class PostgresRepository:
             raise RunNotFound(run_id)
         return _decode_record(record)
 
-    async def list_runs(self, limit: int) -> list[Run]:
+    async def list_runs(self, limit: int, workspace_id: str = "default") -> list[Run]:
         limit = limit if 1 <= limit <= 100 else 20
         rows = await self._pool().fetch(
-            "SELECT record_json FROM verity.runs ORDER BY created_at DESC LIMIT $1", limit
+            "SELECT record_json FROM verity.runs WHERE workspace_id=$1 "
+            "ORDER BY created_at DESC LIMIT $2",
+            workspace_id,
+            limit,
         )
         return [_decode_record(row["record_json"]) for row in rows]
 
@@ -254,3 +312,29 @@ class PostgresRepository:
         result = await self._pool().execute("DELETE FROM verity.runs WHERE id=$1", run_id)
         if result == "DELETE 0":
             raise RunNotFound(run_id)
+
+    async def find_idempotent_run(self, workspace_id: str, idempotency_key: str) -> Run | None:
+        if not idempotency_key:
+            return None
+        record = await self._pool().fetchval(
+            "SELECT record_json FROM verity.runs WHERE workspace_id=$1 AND idempotency_key=$2 "
+            "ORDER BY created_at DESC LIMIT 1",
+            workspace_id,
+            idempotency_key,
+        )
+        return _decode_record(record) if record is not None else None
+
+    async def recover_expired_runs(self) -> int:
+        rows = await self._pool().fetch(
+            "SELECT record_json FROM verity.runs WHERE status='running'"
+        )
+        recovered = 0
+        for row in rows:
+            run = _decode_record(row["record_json"])
+            if run.lease_expires_at and run.lease_expires_at <= utc_now():
+                run.status = "queued"
+                run.lease_owner = ""
+                run.lease_expires_at = None
+                await self.save_run(run)
+                recovered += 1
+        return recovered

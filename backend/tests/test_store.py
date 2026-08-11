@@ -1,8 +1,9 @@
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 
-from verity.models import Event, Run
+from verity.models import Event, Run, utc_now
 from verity.store import RunNotFound, SQLiteRepository
 
 
@@ -44,4 +45,29 @@ async def test_list_runs_is_newest_first(repository: SQLiteRepository) -> None:
     await repository.create_run(Run(id="second", question="Second valid question?"))
     runs = await repository.list_runs(20)
     assert [run.id for run in runs] == ["second", "first"]
+
+
+async def test_idempotency_is_workspace_scoped(repository: SQLiteRepository) -> None:
+    await repository.create_run(
+        Run(
+            id="same",
+            question="A valid question?",
+            workspace_id="one",
+            idempotency_key="k",
+        )
+    )
+    assert (await repository.find_idempotent_run("one", "k")).id == "same"
+    assert await repository.find_idempotent_run("two", "k") is None
+
+
+async def test_expired_lease_is_requeued(repository: SQLiteRepository) -> None:
+    run = Run(
+        id="leased",
+        question="A valid question?",
+        status="running",
+        lease_expires_at=utc_now() - timedelta(seconds=1),
+    )
+    await repository.create_run(run)
+    assert await repository.recover_expired_runs() == 1
+    assert (await repository.get_run(run.id)).status == "queued"
 

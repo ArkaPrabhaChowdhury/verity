@@ -1,7 +1,7 @@
-export type WorkspaceView = "evidence" | "report" | "timeline" | "compare" | "details";
+export type WorkspaceView = "evidence" | "report" | "timeline" | "compare" | "details" | "operations";
 
 const views: Array<{ id: WorkspaceView; label: string }> = [
-  { id: "evidence", label: "Evidence" }, { id: "report", label: "Report" }, { id: "timeline", label: "Timeline" }, { id: "compare", label: "Compare" }, { id: "details", label: "Run details" },
+  { id: "evidence", label: "Evidence" }, { id: "report", label: "Report" }, { id: "timeline", label: "Timeline" }, { id: "compare", label: "Compare" }, { id: "details", label: "Run details" }, { id: "operations", label: "Operations" },
 ];
 
 export function WorkspaceNav({ view, onChange, active, onCancel, onRetry, onDelete }: { view: WorkspaceView; onChange: (view: WorkspaceView) => void; active: boolean; onCancel: () => void; onRetry: () => void; onDelete: () => void }) {

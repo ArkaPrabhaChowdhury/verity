@@ -294,10 +294,90 @@ class OpenAlexProvider:
         return results
 
 
+class PubMedProvider:
+    """Keyless PubMed search fallback for biomedical research questions."""
+
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        self.client = client
+
+    async def search(self, query: str, max_results: int) -> list[SearchResult]:
+        response = await self.client.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+            params={"db": "pubmed", "term": query, "retmode": "json", "retmax": max_results},
+            headers={"Accept": "application/json", "User-Agent": "Verity/2.0"},
+        )
+        if not response.is_success:
+            raise ProviderHTTPError(response.status_code, "PubMed search failed")
+        ids = response.json().get("esearchresult", {}).get("idlist", [])
+        if not ids:
+            return []
+        summary = await self.client.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+            params={"db": "pubmed", "id": ",".join(ids), "retmode": "json"},
+            headers={"Accept": "application/json", "User-Agent": "Verity/2.0"},
+        )
+        if not summary.is_success:
+            raise ProviderHTTPError(summary.status_code, "PubMed summary failed")
+        result = summary.json().get("result", {})
+        return [
+            SearchResult(
+                title=str(result[item].get("title", "")).strip(),
+                url=f"https://pubmed.ncbi.nlm.nih.gov/{item}/",
+                description=(
+                    "PubMed-indexed research record. "
+                    "Retrieve the abstract and full citation from the source page."
+                ),
+            )
+            for item in ids
+            if item in result and str(result[item].get("title", "")).strip()
+        ]
+
+
+class CrossrefProvider:
+    """Keyless scholarly metadata fallback for cross-disciplinary research."""
+
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        self.client = client
+
+    async def search(self, query: str, max_results: int) -> list[SearchResult]:
+        response = await self.client.get(
+            "https://api.crossref.org/works",
+            params={"query.bibliographic": query, "rows": max_results},
+            headers={"Accept": "application/json", "User-Agent": "Verity/2.0"},
+        )
+        if not response.is_success:
+            raise ProviderHTTPError(response.status_code, "Crossref search failed")
+        results: list[SearchResult] = []
+        for item in response.json().get("message", {}).get("items", []):
+            title = str((item.get("title") or [""])[0]).strip()
+            doi = str(item.get("DOI", "")).strip()
+            if title and doi:
+                results.append(
+                    SearchResult(
+                        title=title,
+                        url=f"https://doi.org/{doi}",
+                        description="Crossref-indexed scholarly work.",
+                    )
+                )
+        return results
+
+
 class CompositeSearchProvider:
-    def __init__(self, primary: SearchProvider, scholarly: SearchProvider) -> None:
+    def __init__(
+        self,
+        primary: SearchProvider,
+        scholarly: SearchProvider,
+        additional_scholarly: SearchProvider | list[SearchProvider] | None = None,
+    ) -> None:
         self.primary = primary
         self.scholarly = scholarly
+        self.additional_scholarly = (
+            []
+            if additional_scholarly is None
+            else additional_scholarly
+            if isinstance(additional_scholarly, list)
+            else [additional_scholarly]
+        )
 
     async def search(self, query: str, max_results: int) -> list[SearchResult]:
         primary_error: Exception | None = None
@@ -315,10 +395,12 @@ class CompositeSearchProvider:
             if primary_error:
                 raise primary_error
             return []
-        try:
-            scholarly = await self.scholarly.search(query, max_results)
-        except Exception:
-            scholarly = []
+        scholarly: list[SearchResult] = []
+        for provider in [self.scholarly, *self.additional_scholarly]:
+            try:
+                scholarly.extend(await provider.search(query, max_results))
+            except Exception:
+                continue
         merged: dict[str, SearchResult] = {item.url.rstrip("/"): item for item in results}
         for item in scholarly:
             merged.setdefault(item.url.rstrip("/"), item)

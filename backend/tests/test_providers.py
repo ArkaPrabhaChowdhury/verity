@@ -3,10 +3,12 @@ import pytest
 
 from verity.models import CompletionRequest, CompletionResponse
 from verity.providers import (
+    CrossrefProvider,
     FallbackProvider,
     OpenAlexProvider,
     ProviderHTTPError,
     ProviderNotConfigured,
+    PubMedProvider,
     SearXNGProvider,
 )
 
@@ -82,3 +84,37 @@ async def test_openalex_maps_scholarly_work_metadata() -> None:
         results = await OpenAlexProvider(client).search("research query", 3)
     assert results[0].url == "https://doi.org/10.1234/example"
     assert results[0].description == "Evidence supports"
+
+
+async def test_pubmed_maps_indexed_records() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("esearch.fcgi"):
+            return httpx.Response(200, json={"esearchresult": {"idlist": ["123"]}})
+        return httpx.Response(
+            200,
+            json={"result": {"123": {"uid": "123", "title": "Intermittent fasting review"}}},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        results = await PubMedProvider(client).search("intermittent fasting", 3)
+    assert results[0].url == "https://pubmed.ncbi.nlm.nih.gov/123/"
+    assert results[0].title == "Intermittent fasting review"
+
+
+async def test_crossref_maps_doi_records() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "message": {
+                    "items": [
+                        {"DOI": "10.1234/example", "title": ["Urban heat review"]}
+                    ]
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        results = await CrossrefProvider(client).search("urban tree heat", 3)
+    assert results[0].url == "https://doi.org/10.1234/example"
+    assert results[0].title == "Urban heat review"

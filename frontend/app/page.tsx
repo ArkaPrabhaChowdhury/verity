@@ -11,6 +11,7 @@ import { SourceInspector } from "@/components/source-inspector";
 import { TimelinePanel } from "@/components/timeline-panel";
 import { TrustBanner } from "@/components/trust-banner";
 import { WorkspaceNav, type WorkspaceView } from "@/components/workspace-nav";
+import { OperationsPanel } from "@/components/operations-panel";
 import { cancelRun, createRun, deleteRun, getRun, listRunEvents, listRuns, retryRun, streamURL } from "@/lib/api";
 import type { Run, RunEvent, SourceEvidence } from "@/lib/types";
 
@@ -86,6 +87,7 @@ export default function Home() {
         {view === "timeline" ? <TimelinePanel events={events} /> : null}
         {view === "compare" ? <ComparePanel active={activeRun} runs={runs} /> : null}
         {view === "details" ? <DetailsPanel run={activeRun} /> : null}
+        {view === "operations" ? <OperationsPanel run={activeRun} /> : null}
         {!activeRun && view === "evidence" ? <ReportPanel run={activeRun} /> : null}
       </main><SourceInspector source={selectedSource} onClose={() => setSelectedSource(undefined)} />
     </div>

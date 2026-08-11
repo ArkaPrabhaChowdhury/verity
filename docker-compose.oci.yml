@@ -1,4 +1,17 @@
 services:
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - verity-redis-data:/data
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
   searxng:
     image: docker.io/searxng/searxng@sha256:252cfb5b348809167f5519970ca3457711e723afc76179a662b1c720cbbc1dd3
     restart: unless-stopped
@@ -28,6 +41,10 @@ services:
       SEARXNG_URL: http://searxng:8080
       VERITY_ADDR: :8080
       VERITY_DB_PATH: /app/data/verity.db
+      VERITY_REDIS_URL: redis://redis:6379/0
+      VERITY_REDIS_STREAM: ${VERITY_REDIS_STREAM:-verity:research}
+      VERITY_REDIS_GROUP: ${VERITY_REDIS_GROUP:-verity-workers}
+      VERITY_REDIS_VISIBILITY_TIMEOUT_MS: ${VERITY_REDIS_VISIBILITY_TIMEOUT_MS:-600000}
       VERITY_ALLOWED_ORIGINS: ${VERITY_ALLOWED_ORIGINS:-https://verity.vercel.app}
       VERITY_CONCURRENCY: "1"
       VERITY_MAX_ACTIVE_RUNS: "1"
@@ -42,6 +59,8 @@ services:
       timeout: 5s
       retries: 10
     depends_on:
+      redis:
+        condition: service_healthy
       searxng:
         condition: service_healthy
 
@@ -65,6 +84,7 @@ services:
 
 volumes:
   verity-data:
+  verity-redis-data:
   searxng-cache:
   caddy-data:
   caddy-config:

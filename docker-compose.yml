@@ -1,4 +1,16 @@
 services:
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - verity-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   searxng:
     image: docker.io/searxng/searxng@sha256:252cfb5b348809167f5519970ca3457711e723afc76179a662b1c720cbbc1dd3
     environment:
@@ -17,6 +29,7 @@ services:
       retries: 10
 
   backend:
+    restart: unless-stopped
     build: ./backend
     environment:
       GROQ_API_KEY: ${GROQ_API_KEY:-}
@@ -28,6 +41,10 @@ services:
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
       VERITY_ADDR: :8080
       VERITY_DB_PATH: /app/data/verity.db
+      VERITY_REDIS_URL: redis://redis:6379/0
+      VERITY_REDIS_STREAM: ${VERITY_REDIS_STREAM:-verity:research}
+      VERITY_REDIS_GROUP: ${VERITY_REDIS_GROUP:-verity-workers}
+      VERITY_REDIS_VISIBILITY_TIMEOUT_MS: ${VERITY_REDIS_VISIBILITY_TIMEOUT_MS:-600000}
       VERITY_ALLOWED_ORIGINS: http://localhost:3000
       VERITY_CONCURRENCY: ${VERITY_CONCURRENCY:-1}
       VERITY_MAX_ACTIVE_RUNS: ${VERITY_MAX_ACTIVE_RUNS:-2}
@@ -49,9 +66,12 @@ services:
       timeout: 3s
       retries: 5
     depends_on:
+      redis:
+        condition: service_healthy
       searxng:
         condition: service_healthy
   frontend:
+    restart: unless-stopped
     build:
       context: ./frontend
     environment:
@@ -65,4 +85,5 @@ services:
 
 volumes:
   verity-data:
+  verity-redis-data:
   searxng-cache:
