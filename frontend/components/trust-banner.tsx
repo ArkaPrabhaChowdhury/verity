@@ -1,7 +1,17 @@
 import type { Run } from "@/lib/types";
 
 export function TrustBanner({ run }: { run?: Run }) {
-  if (!run || !run.trust?.status) return null;
+  if (!run) return null;
+  if (run.status !== "completed" && run.status !== "failed" && run.status !== "cancelled" && run.status !== "dead_letter") {
+    return (
+      <section className="trust-banner pending" aria-label="Trust assessment pending" aria-live="polite">
+        <div className="trust-score"><span>—</span><small>/100</small></div>
+        <div><span className="eyebrow">Deterministic trust gate</span><h2>Assessment pending</h2><p>Verity will evaluate evidence quality after research and critique finish.</p></div>
+        <dl><div><dt>Fully supported</dt><dd>—</dd></div><div><dt>Usable with gaps</dt><dd>—</dd></div><div><dt>Failed</dt><dd>—</dd></div><div><dt>Independent sources</dt><dd>—</dd></div></dl>
+      </section>
+    );
+  }
+  if (!run.trust?.status) return null;
   const trust = run.trust;
   return (
     <section className={`trust-banner ${trust.status}`} aria-label={`Trust assessment: ${trust.status}`}>
