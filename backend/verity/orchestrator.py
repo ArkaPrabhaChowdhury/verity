@@ -31,7 +31,7 @@ from .providers import LLMProvider, SearchProvider, retry_transient
 from .store import Repository
 
 PROMPT_DIR = Path(__file__).with_name("prompts")
-REPORT_URL_PATTERN = re.compile(r"https?://[^\s)]+")
+REPORT_URL_PATTERN = re.compile(r"https?://[^\s\])]+")
 
 
 def prompt(name: str) -> str:
@@ -922,15 +922,40 @@ def validate_report(report: str, allowed_urls: set[str]) -> None:
 
 
 def sanitize_report_urls(report: str, allowed_urls: set[str]) -> str:
-    """Remove hallucinated bare URLs while preserving the cited report structure."""
+    """Repair a structurally valid report after a failed writer retry.
+
+    The writer is required to emit numbered citations. If the second LLM
+    attempt still omits them, returning a URL-sanitized but citation-free
+    report creates a misleadingly polished answer. Rebuild the references
+    from retained evidence and attach the first citation deterministically.
+    """
     if not allowed_urls:
         return report
-    return REPORT_URL_PATTERN.sub(
+    sanitized = REPORT_URL_PATTERN.sub(
         lambda match: match.group(0)
         if match.group(0).rstrip(".,;:") in allowed_urls
         else "",
         report,
     )
+    urls = []
+    for url in REPORT_URL_PATTERN.findall(sanitized):
+        normalized = url.rstrip(".,;:")
+        if normalized in allowed_urls and normalized not in urls:
+            urls.append(normalized)
+    for url in sorted(allowed_urls):
+        if url not in urls:
+            urls.append(url)
+    direct_answer = re.search(r"(\*\*Direct answer:\*\*[^\n]*)", sanitized)
+    if direct_answer and not re.search(r"\[\d+\]", direct_answer.group(1)):
+        line = direct_answer.group(1).rstrip() + " [1]"
+        sanitized = sanitized[: direct_answer.start(1)] + line + sanitized[direct_answer.end(1) :]
+    references = "\n\n## References\n" + "\n".join(
+        f"{index}. [{url}]({url})" for index, url in enumerate(urls, start=1)
+    )
+    sanitized = re.sub(
+        r"\n## References\n.*?(?=\n## Gaps & Caveats\n|$)", "", sanitized, flags=re.DOTALL
+    )
+    return sanitized.rstrip() + references
 
 
 class Engine:

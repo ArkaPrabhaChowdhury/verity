@@ -27,7 +27,11 @@ def completed_ids(path: Path) -> set[str]:
 
 def request_json(url: str, *, method: str = "GET", body: dict[str, Any] | None = None, headers: dict[str, str] | None = None, timeout: float = 60) -> dict[str, Any]:
     payload = json.dumps(body).encode() if body is not None else None
-    final_headers = {"Accept": "application/json", **(headers or {})}
+    final_headers = {
+        "Accept": "application/json",
+        "User-Agent": "VerityEvaluation/1.0 (+https://github.com/ArkaPrabhaChowdhury/verity)",
+        **(headers or {}),
+    }
     if payload is not None:
         final_headers["Content-Type"] = "application/json"
     request = urllib.request.Request(url, data=payload, method=method, headers=final_headers)
@@ -52,4 +56,3 @@ def iter_pending(dataset: Iterable[dict[str, Any]], done: set[str], limit: int |
 
 def sleep_backoff(attempt: int) -> None:
     time.sleep(min(30, 2 ** attempt))
-
