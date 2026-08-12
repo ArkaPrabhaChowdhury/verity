@@ -1,11 +1,27 @@
 {
   "baseline": {
-    "count": 0,
+    "count": 5,
     "successful": 0
   },
   "no_replan": {
-    "count": 0,
-    "successful": 0
+    "count": 1,
+    "successful": 1,
+    "exact_match_pct": 0.0,
+    "partial_match_pct": 100.0,
+    "token_f1_pct": 13.333333333333334,
+    "avg_latency_seconds": 137.965,
+    "p50_latency_seconds": 137.965,
+    "p95_latency_seconds": 137.965,
+    "avg_cost_usd": 0.0007527500000000001,
+    "avg_sources": 0,
+    "contradiction_pct": 0,
+    "avg_trust_score": 70,
+    "citation_validity_pct": 0,
+    "numeric_claim_citation_pct": 0.0,
+    "avg_independent_domains": 9,
+    "abstention_accuracy_pct": null,
+    "failure_rate_pct": 0.0,
+    "abstention_rate_pct": 0.0
   },
   "critic_replan": {
     "count": 0,

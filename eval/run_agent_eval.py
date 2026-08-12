@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import time
 from pathlib import Path
@@ -24,12 +25,15 @@ def main() -> None:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--poll-seconds", type=float, default=1.0)
     parser.add_argument("--run-timeout", type=float, default=240)
+    parser.add_argument("--api-token", default=os.getenv("VERITY_API_TOKEN"), help="Optional bearer token for authenticated deployments")
     args = parser.parse_args()
+
+    headers = {"Authorization": f"Bearer {args.api_token}"} if args.api_token else None
 
     done = completed_ids(args.output)
     for item in iter_pending(load_jsonl(args.dataset), done, args.limit):
         started = time.perf_counter()
-        create = request_json(urljoin(args.backend, "/api/runs"), method="POST", body={
+        create = request_json(urljoin(args.backend, "/api/runs"), method="POST", headers=headers, body={
             "question": item["question"],
             "replan_enabled": args.variant == "critic_replan",
         })
@@ -37,11 +41,11 @@ def main() -> None:
         deadline = time.monotonic() + args.run_timeout
         run = None
         while time.monotonic() < deadline:
-            run = request_json(urljoin(args.backend, f"/api/runs/{run_id}"))
-            if run["status"] in ("completed", "failed"):
+            run = request_json(urljoin(args.backend, f"/api/runs/{run_id}"), headers=headers)
+            if run["status"] in ("completed", "failed", "dead_letter"):
                 break
             time.sleep(args.poll_seconds)
-        if run is None or run["status"] not in ("completed", "failed"):
+        if run is None or run["status"] not in ("completed", "failed", "dead_letter"):
             error = "evaluation polling timeout"
             run = run or {}
         else:

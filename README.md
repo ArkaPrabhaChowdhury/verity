@@ -99,21 +99,21 @@ The Next.js route handler proxies API and SSE traffic server-side, so Vercel sto
 
 ## Benchmark
 
-The committed report is intentionally unfilled until a real run is performed. No credentials are available in this repository, so publishing numbers now would fabricate results. In addition to HotpotQA, `eval/datasets/research_quality.jsonl` contains adversarial research prompts covering abstention, metric substitution, denominator ambiguity, causal overclaiming, conflicting forecasts, and high-stakes guarantees. A single live [adversarial smoke result](eval/results/research_quality_smoke.md) demonstrates the end-to-end abstention and corrective re-plan path without presenting it as benchmark evidence.
+The report now contains a measured pilot, but Verity is not yet benchmark-proven. One completed no-re-plan run measured 137.97s latency, $0.00075 estimated cost, 100% partial-match accuracy, and trust score 70; five baseline calls were recorded as Groq HTTP 403 failures. The denominator is intentionally visible in [the raw outputs](eval/results/) and [pilot report](eval/results/benchmark_report.md). Complete the documented 50-question matrix and critic-re-plan variant before making representative accuracy, citation-integrity, cost, or abstention claims. In addition to HotpotQA, `eval/datasets/research_quality.jsonl` contains adversarial research prompts covering abstention, metric substitution, denominator ambiguity, causal overclaiming, conflicting forecasts, and high-stakes guarantees.
 
 | Metric | Baseline | Verity (no re-plan) | Verity (critic re-plan) |
 |---|---:|---:|---:|
-| Completed runs | 0 | 0 | 0 |
-| Accuracy (exact / partial) | NOT RUN / NOT RUN | NOT RUN / NOT RUN | NOT RUN / NOT RUN |
-| Token F1 | NOT RUN | NOT RUN | NOT RUN |
-| Avg wall-clock latency | NOT RUN | NOT RUN | NOT RUN |
-| Avg estimated cost/query | NOT RUN | NOT RUN | NOT RUN |
-| Avg sources cited | NOT RUN | NOT RUN | NOT RUN |
-| Critic detected contradiction | — | NOT RUN | NOT RUN |
-| Avg deterministic trust score | — | NOT RUN | NOT RUN |
-| Citation index validity | — | NOT RUN | NOT RUN |
-| Numeric claims with citations | — | NOT RUN | NOT RUN |
-| Avg independent domains | — | NOT RUN | NOT RUN |
+| Completed runs | 0 | 1 | 0 |
+| Accuracy (exact / partial) | NOT RUN / NOT RUN | 0% / 100% | NOT RUN / NOT RUN |
+| Token F1 | NOT RUN | 13.33% | NOT RUN |
+| Avg / P50 / P95 latency | NOT RUN | 137.97s / 137.97s / 137.97s | NOT RUN |
+| Avg estimated cost/query | NOT RUN | $0.00075 | NOT RUN |
+| Avg sources cited | NOT RUN | 0 | NOT RUN |
+| Critic detected contradiction | — | 0% | NOT RUN |
+| Avg deterministic trust score | — | 70 | NOT RUN |
+| Citation index validity | — | 0% | NOT RUN |
+| Numeric claims with citations | — | 0% | NOT RUN |
+| Avg independent domains | — | 9 | NOT RUN |
 | Abstention accuracy | — | NOT RUN | NOT RUN |
 
 To produce the table from raw evidence:
