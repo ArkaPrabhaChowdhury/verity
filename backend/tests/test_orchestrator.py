@@ -417,3 +417,17 @@ def test_report_sanitizer_removes_unknown_urls() -> None:
 
     assert "unknown.example" not in sanitized
     assert "https://known.example" in sanitized
+
+
+def test_report_sanitizer_repairs_missing_citations() -> None:
+    report = (
+        "**Direct answer:** Supported.\n\n"
+        "## References\n\n"
+        "## Gaps & Caveats\nEvidence is partial."
+    )
+
+    repaired = sanitize_report_urls(report, {"https://known.example"})
+
+    assert "**Direct answer:** Supported. [1]" in repaired
+    assert "1. [https://known.example](https://known.example)" in repaired
+    validate_report(repaired, {"https://known.example"})

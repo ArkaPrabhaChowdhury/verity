@@ -52,13 +52,16 @@ def summarize(records: list[dict[str, Any]]) -> dict[str, Any]:
     numeric_coverage = [item["numeric_claim_citation_pct"] for item in successful if item.get("numeric_claim_citation_pct") is not None]
     domain_counts = [item["independent_domains"] for item in successful if item.get("independent_domains") is not None]
     expected_abstentions = [item for item in successful if item.get("answerable") is False]
+    latencies = [item["latency_seconds"] for item in successful]
     return {
         "count": len(records),
         "successful": len(successful),
         "exact_match_pct": 100 * statistics.mean(em),
         "partial_match_pct": 100 * statistics.mean(partial),
         "token_f1_pct": 100 * statistics.mean(f1),
-        "avg_latency_seconds": statistics.mean(item["latency_seconds"] for item in successful),
+        "avg_latency_seconds": statistics.mean(latencies),
+        "p50_latency_seconds": statistics.median(latencies),
+        "p95_latency_seconds": statistics.quantiles(latencies, n=20, method="inclusive")[18] if len(latencies) > 1 else latencies[0],
         "avg_cost_usd": statistics.mean(item["estimated_cost_usd"] for item in successful),
         "avg_sources": statistics.mean(item["source_count"] for item in successful),
         "contradiction_pct": 100 * statistics.mean(contradictions) if contradictions else None,
@@ -67,6 +70,8 @@ def summarize(records: list[dict[str, Any]]) -> dict[str, Any]:
         "numeric_claim_citation_pct": statistics.mean(numeric_coverage) if numeric_coverage else None,
         "avg_independent_domains": statistics.mean(domain_counts) if domain_counts else None,
         "abstention_accuracy_pct": 100 * statistics.mean(float(item.get("abstained", False)) for item in expected_abstentions) if expected_abstentions else None,
+        "failure_rate_pct": 100 * (len(records) - len(successful)) / len(records) if records else None,
+        "abstention_rate_pct": 100 * statistics.mean(float(item.get("abstained", False)) for item in successful),
     }
 
 
@@ -97,6 +102,7 @@ def main() -> None:
         "| Accuracy (exact / partial) | " + " | ".join(f"{cell(summary, 'exact_match_pct', '%')} / {cell(summary, 'partial_match_pct', '%')}" for _, summary in names) + " |",
         "| Token F1 | " + " | ".join(cell(summary, "token_f1_pct", "%") for _, summary in names) + " |",
         "| Avg wall-clock latency | " + " | ".join(cell(summary, "avg_latency_seconds", "s") for _, summary in names) + " |",
+        "| P50 / P95 latency | " + " | ".join(f"{cell(summary, 'p50_latency_seconds', 's')} / {cell(summary, 'p95_latency_seconds', 's')}" for _, summary in names) + " |",
         "| Avg estimated cost/query | " + " | ".join("NOT RUN" if summary.get("avg_cost_usd") is None else f"${summary['avg_cost_usd']:.5f}" for _, summary in names) + " |",
         "| Avg sources cited | " + " | ".join(cell(summary, "avg_sources") for _, summary in names) + " |",
         "| Critic detected contradiction | — | " + " | ".join(cell(summary, "contradiction_pct", "%") for summary in (summaries["no_replan"], summaries["critic_replan"])) + " |",
@@ -105,10 +111,11 @@ def main() -> None:
         "| Numeric claims with citations | — | " + " | ".join(cell(summary, "numeric_claim_citation_pct", "%") for summary in (summaries["no_replan"], summaries["critic_replan"])) + " |",
         "| Avg independent domains | — | " + " | ".join(cell(summary, "avg_independent_domains") for summary in (summaries["no_replan"], summaries["critic_replan"])) + " |",
         "| Abstention accuracy | — | " + " | ".join(cell(summary, "abstention_accuracy_pct", "%") for summary in (summaries["no_replan"], summaries["critic_replan"])) + " |",
+        "| Failure rate / abstention rate | " + " | ".join(f"{cell(summary, 'failure_rate_pct', '%')} / {cell(summary, 'abstention_rate_pct', '%')}" for _, summary in names) + " |",
     ]
     completed = sum(summary.get("successful", 0) for summary in summaries.values())
-    analysis = "No benchmark claims are made yet. Configure free-tier provider keys and run the documented commands; `score.py` will replace every `NOT RUN` cell from raw JSONL outputs." if completed == 0 else "The table reports every requested metric, including latency and cost regressions. Compare the two Verity columns to isolate the marginal value and overhead of the bounded critic re-plan."
-    report = "# Verity HotpotQA Benchmark\n\n" + "\n".join(table) + "\n\n## Method\n\nA deterministic subset of the official HotpotQA dev-distractor set is sampled with seed 42. Exact match and token F1 follow normalized SQuAD-style answer scoring; partial match is true when token F1 is at least 0.50 or the normalized gold answer is contained in the extracted direct answer. Failed runs remain in raw outputs and are excluded from averages, while the completed-run row exposes the denominator.\n\n## Trade-off analysis\n\n" + analysis + "\n"
+    analysis = "No benchmark claims are made yet. Configure provider access and run the documented commands; `score.py` will replace every `NOT RUN` cell from raw JSONL outputs." if completed == 0 else "This is a measured pilot, not benchmark proof: only completed raw records are scored, and the table exposes the small denominator. The baseline sample recorded provider HTTP 403 failures, so its NOT RUN cells are an observed integration failure rather than a zero score. Run the full 50-question matrix before presenting accuracy or citation integrity as representative."
+    report = "# Verity HotpotQA Benchmark (measured pilot)\n\n" + "\n".join(table) + "\n\n## Method\n\nA deterministic subset of the official HotpotQA dev-distractor set is sampled with seed 42. Exact match and token F1 follow normalized SQuAD-style answer scoring; partial match is true when token F1 is at least 0.50 or the normalized gold answer is contained in the extracted direct answer. Failed runs remain in raw outputs and are excluded from averages, while the completed-run row exposes the denominator. This report is a pilot result and must not be described as a representative benchmark until all planned variants complete across the 50-question set.\n\n## Trade-off analysis\n\n" + analysis + "\n"
     args.report.write_text(report, encoding="utf-8")
     print(report)
 
