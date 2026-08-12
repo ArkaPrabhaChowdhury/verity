@@ -431,3 +431,39 @@ def test_report_sanitizer_repairs_missing_citations() -> None:
     assert "**Direct answer:** Supported. [1]" in repaired
     assert "1. [https://known.example](https://known.example)" in repaired
     validate_report(repaired, {"https://known.example"})
+
+
+def test_authoritative_success_is_not_downgraded_by_auxiliary_failures() -> None:
+    findings = [
+        Finding(
+            sub_question_id="official",
+            question="official capital",
+            status="success",
+            sources=[
+                source("https://gov.example/capital", 95).model_copy(
+                    update={"source_type": "government"}
+                )
+            ],
+            round=0,
+            candidate_count=24,
+            fetched_count=5,
+            relevant_count=2,
+            retained_count=2,
+            direct_fetch_failures=1,
+        ),
+        Finding(
+            sub_question_id="auxiliary",
+            question="unnecessary auxiliary lookup",
+            status="failed",
+            round=0,
+            candidate_count=24,
+            direct_fetch_failures=20,
+            rejected_count=24,
+            error="no usable evidence",
+        ),
+    ]
+
+    trust = assess_trust(findings, [])
+
+    assert trust.status == "verified"
+    assert trust.diagnosis == "none"

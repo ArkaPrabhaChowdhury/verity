@@ -740,11 +740,25 @@ def assess_trust(
         direct_failures=direct_failures,
         rejected=rejected,
         errors=errors,
+        authoritative_support=any(
+            source.quality_score >= 90
+            and source.source_type in {"government", "documentation", "research"}
+            for item in findings
+            if item.status == "success"
+            for source in item.sources
+        ),
     )
     source_scores = [
         source.quality_score for item in findings for source in item.sources
     ]
     average_quality = round(sum(source_scores) / len(source_scores)) if source_scores else 0
+    authoritative_support = any(
+        source.quality_score >= 90
+        and source.source_type in {"government", "documentation", "research"}
+        for item in findings
+        if item.status == "success"
+        for source in item.sources
+    )
     total = len(findings)
     score, reasons = 100, []
 
@@ -777,11 +791,20 @@ def assess_trust(
         reasons.append(
             "The run reached its re-plan limit; unresolved gaps remain reflected in the score."
         )
+    if authoritative_support:
+        score = max(score, 70)
+        reasons.append(
+            "A successful path retained authoritative evidence directly supporting the answer."
+        )
 
     score = max(0, score)
-    if score < 50 or not successful or len(independent_sources) < 2:
+    if score < 50 or not successful or (len(independent_sources) < 1 and not authoritative_support):
         status = "inconclusive"
-    elif partial or failed or contradictions or forced_proceed or average_quality < 70:
+    elif contradictions:
+        status = "qualified"
+    elif authoritative_support:
+        status = "verified"
+    elif partial or failed or forced_proceed or average_quality < 70:
         status = "qualified"
     else:
         status = "verified"
@@ -816,10 +839,13 @@ def diagnose_evidence(
     direct_failures: int,
     rejected: int,
     errors: list[str],
+    authoritative_support: bool = False,
 ) -> str:
     """Explain why coverage is weak; do not imply that knowledge is absent."""
     if contradictions:
         return "source_conflict"
+    if authoritative_support:
+        return "none"
     if errors and candidates == 0:
         return "retrieval_failed"
     if candidates == 0:
