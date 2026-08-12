@@ -23,3 +23,6 @@ output/
 .env*
 eval/results/*.log
 eval/run_snapshot.json
+eval/results/*_probe.jsonl
+eval/results/baseline_fixed.jsonl
+eval/results/no_replan.jsonl
